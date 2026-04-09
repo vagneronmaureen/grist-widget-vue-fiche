@@ -233,7 +233,8 @@ function toggleEditMode() {
 function renderForm() {
   const form = el('product-form');
   form.innerHTML = '';
-  if (editMode) form.classList.add('edit-mode'); else form.classList.remove('edit-mode');
+  if (editMode) form.classList.add('edit-mode'); 
+  else form.classList.remove('edit-mode');
 
   if (layout.length === 0) {
     form.innerHTML = `<div style="padding:28px 20px;color:var(--text-muted);font-size:13px;text-align:center;">
@@ -241,50 +242,84 @@ function renderForm() {
     return;
   }
 
-  let isFirst=true, grid=null, usedCols=0;
-  const flushGrid = () => { if(grid){ form.appendChild(grid); grid=null; usedCols=0; } };
-  const getGrid   = () => { if(!grid){ grid=document.createElement('div'); grid.className='form-grid'; } return grid; };
+  let isFirst  = true;  // pour le style du premier élément (pas de border-top)
+  let grid     = null;  // la ligne <div> en cours de construction (null = pas encore commencée)
+  let usedCols = 0;     // nb de colonnes occupées dans la ligne en cours (max 6)
+
+  // Ajoute la ligne en cours au formulaire et remet les compteurs à zéro
+  const flushGrid = () => {
+    if (grid) {
+      form.appendChild(grid);
+      grid     = null;
+      usedCols = 0;
+    }
+  };
+
+  // Retourne la ligne en cours, ou en crée une nouvelle si elle n'existe pas encore
+  const getGrid = () => {
+    if (!grid) {
+      grid = document.createElement('div');
+      grid.className = 'form-grid';
+    }
+    return grid;
+  };
 
   layout.forEach((item, idx) => {
-    if (item.kind === 'title') {
-      flushGrid();
-      const div = makeEl('div', 'form-section-title'+(isFirst?' first-el':''), idx);
-      if (editMode) {
-        const inp = inlineInput('700','13px','var(--text)', item.label||'Section');
-        inp.addEventListener('change', e => { layout[idx].label=e.target.value; saveLayout(); });
-        div.appendChild(inp);
-      } else { div.textContent = item.label||'Section'; }
-      if (editMode) addOverlay(div, idx);
-      form.appendChild(div); isFirst=false;
 
+    // ── TITRE DE SECTION ──────────────────────────────────────────
+    if (item.kind === 'title') {
+      flushGrid(); // on termine la ligne de champs en cours avant le titre
+      const div = makeEl('div', 'form-section-title' + (isFirst ? ' first-el' : ''), idx);
+      if (editMode) {
+        const inp = inlineInput('700', '13px', 'var(--text)', item.label || 'Section');
+        inp.addEventListener('change', e => { layout[idx].label = e.target.value; saveLayout(); });
+        div.appendChild(inp);
+      } else {
+        div.textContent = item.label || 'Section';
+      }
+      if (editMode) addOverlay(div, idx);
+      form.appendChild(div);
+      isFirst = false;
+
+    // ── TEXTE DESCRIPTIF ──────────────────────────────────────────
     } else if (item.kind === 'desc') {
       flushGrid();
       const div = makeEl('div', 'form-section-desc', idx);
       if (editMode) {
-        const ta = inlineTextarea('400','12px','var(--text-label)', item.label||'');
-        ta.addEventListener('change', e => { layout[idx].label=e.target.value; saveLayout(); });
+        const ta = inlineTextarea('400', '12px', 'var(--text-label)', item.label || '');
+        ta.addEventListener('change', e => { layout[idx].label = e.target.value; saveLayout(); });
         div.appendChild(ta);
-      } else { div.textContent = item.label||''; }
+      } else {
+        div.textContent = item.label || '';
+      }
       if (editMode) addOverlay(div, idx);
       form.appendChild(div);
 
+    // ── SÉPARATEUR HORIZONTAL ─────────────────────────────────────
     } else if (item.kind === 'separator') {
       flushGrid();
       const div = makeEl('div', 'form-separator', idx);
       if (editMode) addOverlay(div, idx);
       form.appendChild(div);
 
+    // ── CHAMP ─────────────────────────────────────────────────────
     } else if (item.kind === 'field') {
-      const span = item.span||3;
-      if (usedCols+span > 6) flushGrid();
+      const span = Math.min(item.span || 3, 6); // sécurité : jamais plus de 6
+
+      // Si ce champ ne rentre pas dans la ligne en cours → on flush et on repart
+      if (usedCols + span > 6) flushGrid();
+
       const cell = buildFieldCell(item, idx);
       cell.classList.add(`span-${span}`);
       getGrid().appendChild(cell);
-      usedCols += span; isFirst=false;
-      if (usedCols >= 6) flushGrid();
+      usedCols += span;
+      isFirst = false;
     }
   });
 
+  // Flush final : valide la dernière ligne si elle n'est pas pleine
+  // (ex : une seule ligne avec 2 champs span-3 qui fait exactement 6,
+  //  ou une ligne incomplète comme un seul champ span-3)
   flushGrid();
 }
 
