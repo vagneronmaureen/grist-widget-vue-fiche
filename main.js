@@ -449,34 +449,38 @@ function buildChoiceSelect(col, currentVal, onChange) {
 // ── ChoiceList (multi) — tags + bouton "+" ──
 function buildChoiceList(col, currentVal, onChange) {
   let selected = Array.isArray(currentVal) ? [...currentVal]
-               : (currentVal && typeof currentVal==='string') ? currentVal.split(',').map(s=>s.trim()).filter(Boolean)
-               : [];
+    : (currentVal && typeof currentVal === 'string')
+      ? currentVal.split(',').map(s => s.trim()).filter(Boolean)
+      : [];
 
   const wrap = document.createElement('div');
   wrap.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:3px 0;position:relative;';
 
-  // Dropdown caché
   const dropdown = document.createElement('div');
   dropdown.style.cssText = `
     display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:150;min-width:160px;
     background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
     box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:4px;
   `;
+  // Le dropdown est ajouté UNE SEULE FOIS au wrap, ici, et n'en bouge plus jamais
+  wrap.appendChild(dropdown);
 
   const renderAll = () => {
-    // Vider sauf le dropdown
-    Array.from(wrap.children).forEach(c => { if(c!==dropdown) c.remove(); });
+    // On vide wrap SAUF le dropdown
+    Array.from(wrap.children).forEach(c => { if (c !== dropdown) c.remove(); });
 
-    // Tags existants
+    // Tags des valeurs sélectionnées — ajoutés avant le dropdown via appendChild
+    // mais comme dropdown est déjà dans wrap, ils se placent avant lui
     selected.forEach((s, i) => {
       const tag = makePill(s, '#e8f0fe', '#1a73e8', () => {
-        selected.splice(i,1); renderAll(); onChange([...selected]);
+        selected.splice(i, 1); renderAll(); onChange([...selected]);
       });
+      // On insère avant le dropdown qui est déjà dans le wrap
       wrap.insertBefore(tag, dropdown);
     });
 
-    // Bouton "+" pour ouvrir le dropdown
-    const remaining = (col.choices||[]).filter(c => !selected.includes(c));
+    // Bouton "+"
+    const remaining = (col.choices || []).filter(c => !selected.includes(c));
     if (remaining.length > 0) {
       const addBtn = document.createElement('button');
       addBtn.style.cssText = `
@@ -487,8 +491,8 @@ function buildChoiceList(col, currentVal, onChange) {
       `;
       addBtn.textContent = '+';
       addBtn.title = 'Ajouter une valeur';
-      addBtn.addEventListener('mouseenter', () => addBtn.style.background='var(--accent)' || (addBtn.style.color='#fff'));
-      addBtn.addEventListener('mouseleave', () => { addBtn.style.background='var(--accent-light)'; addBtn.style.color='var(--accent)'; });
+      addBtn.addEventListener('mouseenter', () => { addBtn.style.background = 'var(--accent)'; addBtn.style.color = '#fff'; });
+      addBtn.addEventListener('mouseleave', () => { addBtn.style.background = 'var(--accent-light)'; addBtn.style.color = 'var(--accent)'; });
 
       // Contenu du dropdown
       dropdown.innerHTML = '';
@@ -496,30 +500,32 @@ function buildChoiceList(col, currentVal, onChange) {
         const item = document.createElement('div');
         item.style.cssText = 'padding:5px 8px;cursor:pointer;font-size:12px;border-radius:2px;transition:background .1s;';
         item.textContent = choice;
-        item.addEventListener('mouseenter', () => item.style.background='var(--bg)');
-        item.addEventListener('mouseleave', () => item.style.background='');
-        item.addEventListener('mousedown', e => {
-          e.preventDefault();
-          selected.push(choice); renderAll(); onChange([...selected]);
-          dropdown.style.display='none';
+        item.addEventListener('mouseenter', () => item.style.background = 'var(--bg)');
+        item.addEventListener('mouseleave', () => item.style.background = '');
+        item.addEventListener('click', e => {
+          e.stopPropagation();
+          selected.push(choice);
+          renderAll();
+          onChange([...selected]);
+          dropdown.style.display = 'none';
         });
         dropdown.appendChild(item);
       });
 
       addBtn.addEventListener('click', e => {
         e.stopPropagation();
-        const isOpen = dropdown.style.display==='block';
-        dropdown.style.display = isOpen ? 'none' : 'block';
+        dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
       });
 
+      // Insère le bouton "+" avant le dropdown
       wrap.insertBefore(addBtn, dropdown);
     }
-
-    wrap.appendChild(dropdown);
   };
 
-  // Fermer le dropdown si on clique ailleurs
-  document.addEventListener('click', () => { dropdown.style.display='none'; }, { capture: true });
+  // Ferme le dropdown si clic en dehors
+  document.addEventListener('click', (e) => {
+    if (!wrap.contains(e.target)) dropdown.style.display = 'none';
+  });
 
   renderAll();
   return wrap;
