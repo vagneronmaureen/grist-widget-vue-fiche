@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fiche Produit SDPC</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="main.js"></script>
+<style>
+  :root {
+    --bg:           #f7f7f7;
+    --surface:      #ffffff;
+    --border:       #e8e8e8;
+    --accent:       #16B378;
+    --accent-light: #e8f7f1;
+    --accent-mid:   #0ea066;
+    --danger:       #d0021b;
+    --text:         #262633;
+    --text-label:   #929299;
+    --text-muted:   #b8b8bf;
+    --shadow:       0 1px 4px rgba(0,0,0,0.07);
+    --r:            3px;
+    --font:         -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font); font-size: 13px;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh; display: flex; flex-direction: column;
+  }
+
+  /* ══ TOP BAR ══ */
+  #topbar {
+    height: 48px; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 16px; flex-shrink: 0;
+    position: sticky; top: 0; z-index: 200;
+  }
+  .tb-label { font-size: 12px; color: var(--text-label); white-space: nowrap; }
+  #product-select {
+    height: 28px; min-width: 220px; max-width: 360px; flex: 1;
+    border: 1px solid var(--border); border-radius: var(--r);
+    background: var(--surface); color: var(--text);
+    font-family: var(--font); font-size: 13px; padding: 0 8px;
+    outline: none; cursor: pointer;
+  }
+  #product-select:focus { border-color: var(--accent); }
+  #product-count { font-size: 12px; color: var(--text-muted); }
+  .tb-spacer { flex: 1; }
+
+  .tb-btn {
+    height: 28px; padding: 0 12px;
+    border: 1px solid var(--border); border-radius: var(--r);
+    background: var(--surface); color: var(--text);
+    font-family: var(--font); font-size: 12px;
+    cursor: pointer; display: flex; align-items: center; gap: 5px;
+    white-space: nowrap; transition: background 0.1s;
+  }
+  .tb-btn:hover  { background: var(--bg); }
+  .tb-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  #btn-save {
+    height: 28px; padding: 0 14px; border: none; border-radius: var(--r);
+    background: var(--accent); color: #fff;
+    font-family: var(--font); font-size: 12px; font-weight: 600;
+    cursor: pointer; display: none; align-items: center; gap: 5px;
+  }
+  #btn-save:hover { opacity: .88; }
+  #btn-save.visible { display: flex; }
+  #btn-discard {
+    height: 28px; padding: 0 12px;
+    border: 1px solid var(--border); border-radius: var(--r);
+    background: var(--surface); color: var(--text);
+    font-family: var(--font); font-size: 12px;
+    cursor: pointer; display: none; align-items: center; transition: background 0.1s;
+  }
+  #btn-discard:hover { background: var(--bg); }
+  #btn-discard.visible { display: flex; }
+
+  /* ══ CARD AREA ══ */
+  #card-area { flex: 1; overflow-y: auto; padding: 24px 32px; }
+
+  #loading, #empty-state {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; min-height: 220px; gap: 10px; color: var(--text-muted);
+  }
+  .spinner {
+    width: 18px; height: 18px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ══ FORMULAIRE ══ */
+  #product-form {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    width: 100%;
+    box-shadow: var(--shadow);
+    overflow: visible; /* pour que les toolbars flottantes soient visibles */
+    position: relative;
+  }
+
+  /* ── Mode édition : bande verte en haut ── */
+  #product-form.edit-mode {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-light), var(--shadow);
+  }
+
+  /* ══ ÉLÉMENTS DU FORMULAIRE ══ */
+
+  /* Grille 6 colonnes pour les champs */
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    border-top: 1px solid var(--border);
+    position: relative;
+  }
+  .form-grid:first-child { border-top: none; }
+
+  /* Champ */
+  .form-field {
+    padding: 10px 20px;
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 3px; min-width: 0;
+    position: relative;
+  }
+  .form-field:last-child { border-right: none; }
+  .span-2 { grid-column: span 2; }
+  .span-3 { grid-column: span 3; }
+  .span-4 { grid-column: span 4; }
+  .span-6 { grid-column: span 6; border-right: none; }
+
+  .form-field-label {
+    font-size: 11px; font-weight: 600; color: var(--text-label);
+    text-transform: uppercase; letter-spacing: 0.05em; user-select: none;
+  }
+  .form-field-input,
+  .form-field-textarea {
+    font-family: var(--font); font-size: 13px; color: var(--text);
+    background: transparent; border: none;
+    border-bottom: 1.5px solid transparent;
+    outline: none; padding: 2px 0 1px; width: 100%;
+    transition: border-color 0.15s; resize: none;
+  }
+  .form-field-input:hover,
+  .form-field-textarea:hover  { border-bottom-color: var(--border); }
+  .form-field-input:focus,
+  .form-field-textarea:focus  { border-bottom-color: var(--accent); }
+  .form-field-input::placeholder,
+  .form-field-textarea::placeholder { color: var(--text-muted); font-style: italic; }
+  .form-field-textarea { line-height: 1.5; min-height: 52px; }
+  .form-field-check-wrap { display: flex; align-items: center; gap: 7px; padding: 3px 0; }
+  input[type="checkbox"].grist-check {
+    width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer;
+  }
+
+  /* Titre de section */
+  .form-section-title {
+    padding: 18px 20px 6px; font-size: 13px; font-weight: 700; color: var(--text);
+    border-top: 1px solid var(--border); position: relative;
+  }
+  .form-section-title.first-el { border-top: none; }
+
+  /* Description */
+  .form-section-desc {
+    padding: 2px 20px 10px; font-size: 12px; color: var(--text-label);
+    line-height: 1.55; position: relative;
+  }
+
+  /* Séparateur */
+  .form-separator { height: 1px; background: var(--border); margin: 6px 0; position: relative; }
+
+  /* ══ OVERLAYS MODE ÉDITION ══ */
+
+  /* Chaque élément draggable en mode édition */
+  .edit-mode .draggable-el {
+    cursor: grab;
+  }
+  .edit-mode .draggable-el:active { cursor: grabbing; }
+
+  /* Highlight au survol en mode édition */
+  .edit-mode .draggable-el:hover > .el-overlay {
+    opacity: 1;
+  }
+
+  /* Overlay transparent sur chaque élément */
+  .el-overlay {
+    display: none;
+    position: absolute;
+    inset: 0;
+    border: 2px solid transparent;
+    border-radius: 2px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s;
+    z-index: 10;
+  }
+  .edit-mode .el-overlay { display: block; }
+  .edit-mode .draggable-el:hover > .el-overlay {
+    border-color: var(--accent);
+    background: rgba(22, 179, 120, 0.04);
+  }
+  .edit-mode .draggable-el.drag-over > .el-overlay {
+    border-color: var(--accent);
+    border-style: dashed;
+    background: var(--accent-light);
+    opacity: 1;
+  }
+  .edit-mode .draggable-el.dragging { opacity: .3; }
+
+  /* Barre d'outils flottante sur l'élément survolé */
+  .el-toolbar {
+    display: none;
+    position: absolute;
+    top: 4px; right: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+    z-index: 20;
+    flex-direction: row;
+    gap: 0;
+    overflow: hidden;
+  }
+  .edit-mode .draggable-el:hover .el-toolbar { display: flex; }
+
+  .el-tb-btn {
+    height: 24px; padding: 0 8px;
+    border: none; border-right: 1px solid var(--border);
+    background: var(--surface); color: var(--text-label);
+    font-family: var(--font); font-size: 11px; font-weight: 600;
+    cursor: pointer; display: flex; align-items: center; gap: 4px;
+    white-space: nowrap; transition: background .1s, color .1s;
+  }
+  .el-tb-btn:last-child { border-right: none; }
+  .el-tb-btn:hover { background: var(--bg); color: var(--text); }
+  .el-tb-btn.danger:hover { background: #fde8ea; color: var(--danger); }
+  .el-tb-btn.w-active { background: var(--accent-light); color: var(--accent); }
+
+  /* Poignée drag visible dans toolbar */
+  .drag-handle {
+    height: 24px; padding: 0 6px;
+    border-right: 1px solid var(--border);
+    background: var(--surface); color: var(--text-muted);
+    display: flex; align-items: center; cursor: grab;
+  }
+  .drag-handle:active { cursor: grabbing; }
+
+  /* Indicateur de drop entre éléments */
+  .drop-indicator {
+    height: 3px; background: var(--accent);
+    border-radius: 2px; margin: -1px 0;
+    display: none;
+  }
+  .drop-indicator.visible { display: block; }
+
+  /* Bannière mode édition */
+  #edit-banner {
+    display: none;
+    align-items: center; gap: 10px;
+    background: var(--accent-light);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 8px 14px;
+    margin-bottom: 12px;
+    font-size: 12px; color: var(--accent-mid); font-weight: 500;
+  }
+  #edit-banner.visible { display: flex; }
+
+  /* ══ BARRE D'AJOUT (mode édition, bas de fiche) ══ */
+  #add-bar {
+    display: none;
+    gap: 6px; padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  .edit-mode ~ #add-bar,
+  #add-bar.visible { display: flex; }
+
+  .add-btn {
+    height: 26px; padding: 0 10px;
+    border: 1px dashed var(--border); border-radius: var(--r);
+    background: transparent; color: var(--text-label);
+    font-family: var(--font); font-size: 12px;
+    cursor: pointer; display: flex; align-items: center; gap: 5px;
+    transition: all .1s;
+  }
+  .add-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+
+  /* ══ MODAL PICKER ══ */
+  #field-picker {
+    display: none; position: fixed; inset: 0; z-index: 300;
+    background: rgba(0,0,0,0.22); align-items: center; justify-content: center;
+  }
+  #field-picker.open { display: flex; }
+  .picker-box {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12); width: 340px; max-height: 440px;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+  .picker-header {
+    height: 42px; padding: 0 14px; border-bottom: 1px solid var(--border);
+    font-size: 13px; font-weight: 600;
+    display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+  }
+  .picker-close { border: none; background: none; cursor: pointer; color: var(--text-muted); font-size: 18px; }
+  .picker-close:hover { color: var(--text); }
+  .picker-search { padding: 8px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .picker-search input {
+    width: 100%; height: 26px; border: 1px solid var(--border); border-radius: var(--r);
+    padding: 0 8px; font-family: var(--font); font-size: 13px; outline: none; background: var(--bg);
+  }
+  .picker-search input:focus { border-color: var(--accent); }
+  .picker-list { overflow-y: auto; flex: 1; padding: 4px; }
+  .picker-field-btn {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    border-radius: var(--r); border: none; background: none;
+    font-family: var(--font); font-size: 13px; color: var(--text);
+    cursor: pointer; text-align: left; width: 100%; transition: background .1s;
+  }
+  .picker-field-btn:hover { background: var(--bg); }
+  .picker-field-btn.already-added { opacity: .35; cursor: default; }
+  .field-type-tag {
+    font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 2px;
+    background: #f1f3f4; color: #5f6368; text-transform: uppercase;
+    letter-spacing: .03em; margin-left: auto; flex-shrink: 0;
+  }
+
+  /* Toast */
+  #toast {
+    position: fixed; bottom: 18px; left: 50%;
+    transform: translateX(-50%) translateY(6px);
+    background: #333; color: #fff; font-size: 12px; padding: 7px 14px;
+    border-radius: 4px; opacity: 0; pointer-events: none;
+    transition: opacity .2s, transform .2s; z-index: 400;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <span class="tb-label">Produit</span>
+  <select id="product-select"><option value="">— Sélectionner —</option></select>
+  <span id="product-count"></span>
+  <div class="tb-spacer"></div>
+  <button id="btn-discard" onclick="discardChanges()">Annuler</button>
+  <button id="btn-save" onclick="saveChanges()">
+    <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>
+    Enregistrer
+  </button>
+  <button class="tb-btn" id="btn-edit" onclick="toggleEditMode()">
+    <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 01-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 00-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 000-.354l-1.086-1.086zM11.189 6.25L9.75 4.81l-6.286 6.287a.25.25 0 00-.064.108l-.558 1.953 1.953-.558a.25.25 0 00.108-.065L11.19 6.25z"/></svg>
+    Configurer
+  </button>
+</div>
+
+<!-- ZONE PRINCIPALE -->
+<div id="card-area">
+
+  <!-- Bannière mode édition -->
+  <div id="edit-banner">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 110 14A7 7 0 018 1zm0 1.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM8 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 018 6zm0-2.5a1 1 0 110 2 1 1 0 010-2z"/></svg>
+    Mode configuration — glissez les éléments pour les réorganiser, survolez-les pour les modifier
+    <button class="tb-btn" style="margin-left:auto;height:22px;font-size:11px" onclick="toggleEditMode()">Terminer</button>
+  </div>
+
+  <div id="loading"><div class="spinner"></div><span>Connexion à Grist…</span></div>
+
+  <div id="empty-state" style="display:none">
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" style="opacity:.3">
+      <rect x="2" y="3" width="20" height="18" rx="2"/>
+      <line x1="8" y1="8" x2="16" y2="8"/>
+      <line x1="8" y1="12" x2="16" y2="12"/>
+      <line x1="8" y1="16" x2="12" y2="16"/>
+    </svg>
+    <span>Sélectionnez un produit</span>
+  </div>
+
+  <div id="product-form" style="display:none"></div>
+
+  <!-- Barre d'ajout (visible seulement en mode édition) -->
+  <div id="add-bar">
+    <span style="font-size:11px;color:var(--text-muted);align-self:center;margin-right:4px">Ajouter :</span>
+    <button class="add-btn" onclick="addItem('title')">
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M7.75 2a.75.75 0 01.75.75V7h4.25a.75.75 0 010 1.5H8.5v4.25a.75.75 0 01-1.5 0V8.5H2.75a.75.75 0 010-1.5H7V2.75A.75.75 0 017.75 2z"/></svg>
+      Titre
+    </button>
+    <button class="add-btn" onclick="addItem('desc')">
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0114.25 14H1.75A1.75 1.75 0 010 12.25v-8.5C0 2.784.784 2 1.75 2zM1.5 12.25c0 .138.112.25.25.25h12.5a.25.25 0 00.25-.25v-8.5a.25.25 0 00-.25-.25H1.75a.25.25 0 00-.25.25zM3 6.25a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5A.75.75 0 013 6.25zm0 3a.75.75 0 01.75-.75h5a.75.75 0 010 1.5h-5A.75.75 0 013 9.25z"/></svg>
+      Texte
+    </button>
+    <button class="add-btn" onclick="addItem('separator')">
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M1 8a.75.75 0 01.75-.75h12.5a.75.75 0 010 1.5H1.75A.75.75 0 011 8z"/></svg>
+      Séparateur
+    </button>
+    <button class="add-btn" onclick="openFieldPicker()">
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="2" width="12" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7.75 5a.75.75 0 01.75.75V7h1.25a.75.75 0 010 1.5H8.5v1.25a.75.75 0 01-1.5 0V8.5H5.75a.75.75 0 010-1.5H7V5.75A.75.75 0 017.75 5z"/></svg>
+      Champ
+    </button>
+  </div>
+
+</div>
+
+<!-- MODAL PICKER -->
+<div id="field-picker">
+  <div class="picker-box">
+    <div class="picker-header">
+      Ajouter un champ
+      <button class="picker-close" onclick="closeFieldPicker()">×</button>
+    </div>
+    <div class="picker-search">
+      <input type="text" id="picker-search-input" placeholder="Rechercher…" oninput="filterPickerFields()">
+    </div>
+    <div class="picker-list" id="picker-list"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+</body>
+</html>
