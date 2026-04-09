@@ -233,7 +233,8 @@ function toggleEditMode() {
 function renderForm() {
   const form = el('product-form');
   form.innerHTML = '';
-  if (editMode) form.classList.add('edit-mode'); else form.classList.remove('edit-mode');
+  if (editMode) form.classList.add('edit-mode'); 
+  else form.classList.remove('edit-mode');
 
   if (layout.length === 0) {
     form.innerHTML = `<div style="padding:28px 20px;color:var(--text-muted);font-size:13px;text-align:center;">
@@ -241,50 +242,84 @@ function renderForm() {
     return;
   }
 
-  let isFirst=true, grid=null, usedCols=0;
-  const flushGrid = () => { if(grid){ form.appendChild(grid); grid=null; usedCols=0; } };
-  const getGrid   = () => { if(!grid){ grid=document.createElement('div'); grid.className='form-grid'; } return grid; };
+  let isFirst  = true;  // pour le style du premier élément (pas de border-top)
+  let grid     = null;  // la ligne <div> en cours de construction (null = pas encore commencée)
+  let usedCols = 0;     // nb de colonnes occupées dans la ligne en cours (max 6)
+
+  // Ajoute la ligne en cours au formulaire et remet les compteurs à zéro
+  const flushGrid = () => {
+    if (grid) {
+      form.appendChild(grid);
+      grid     = null;
+      usedCols = 0;
+    }
+  };
+
+  // Retourne la ligne en cours, ou en crée une nouvelle si elle n'existe pas encore
+  const getGrid = () => {
+    if (!grid) {
+      grid = document.createElement('div');
+      grid.className = 'form-grid';
+    }
+    return grid;
+  };
 
   layout.forEach((item, idx) => {
-    if (item.kind === 'title') {
-      flushGrid();
-      const div = makeEl('div', 'form-section-title'+(isFirst?' first-el':''), idx);
-      if (editMode) {
-        const inp = inlineInput('700','13px','var(--text)', item.label||'Section');
-        inp.addEventListener('change', e => { layout[idx].label=e.target.value; saveLayout(); });
-        div.appendChild(inp);
-      } else { div.textContent = item.label||'Section'; }
-      if (editMode) addOverlay(div, idx);
-      form.appendChild(div); isFirst=false;
 
+    // ── TITRE DE SECTION ──────────────────────────────────────────
+    if (item.kind === 'title') {
+      flushGrid(); // on termine la ligne de champs en cours avant le titre
+      const div = makeEl('div', 'form-section-title' + (isFirst ? ' first-el' : ''), idx);
+      if (editMode) {
+        const inp = inlineInput('700', '13px', 'var(--text)', item.label || 'Section');
+        inp.addEventListener('change', e => { layout[idx].label = e.target.value; saveLayout(); });
+        div.appendChild(inp);
+      } else {
+        div.textContent = item.label || 'Section';
+      }
+      if (editMode) addOverlay(div, idx);
+      form.appendChild(div);
+      isFirst = false;
+
+    // ── TEXTE DESCRIPTIF ──────────────────────────────────────────
     } else if (item.kind === 'desc') {
       flushGrid();
       const div = makeEl('div', 'form-section-desc', idx);
       if (editMode) {
-        const ta = inlineTextarea('400','12px','var(--text-label)', item.label||'');
-        ta.addEventListener('change', e => { layout[idx].label=e.target.value; saveLayout(); });
+        const ta = inlineTextarea('400', '12px', 'var(--text-label)', item.label || '');
+        ta.addEventListener('change', e => { layout[idx].label = e.target.value; saveLayout(); });
         div.appendChild(ta);
-      } else { div.textContent = item.label||''; }
+      } else {
+        div.textContent = item.label || '';
+      }
       if (editMode) addOverlay(div, idx);
       form.appendChild(div);
 
+    // ── SÉPARATEUR HORIZONTAL ─────────────────────────────────────
     } else if (item.kind === 'separator') {
       flushGrid();
       const div = makeEl('div', 'form-separator', idx);
       if (editMode) addOverlay(div, idx);
       form.appendChild(div);
 
+    // ── CHAMP ─────────────────────────────────────────────────────
     } else if (item.kind === 'field') {
-      const span = item.span||3;
-      if (usedCols+span > 6) flushGrid();
+      const span = Math.min(item.span || 3, 6); // sécurité : jamais plus de 6
+
+      // Si ce champ ne rentre pas dans la ligne en cours → on flush et on repart
+      if (usedCols + span > 6) flushGrid();
+
       const cell = buildFieldCell(item, idx);
       cell.classList.add(`span-${span}`);
       getGrid().appendChild(cell);
-      usedCols += span; isFirst=false;
-      if (usedCols >= 6) flushGrid();
+      usedCols += span;
+      isFirst = false;
     }
   });
 
+  // Flush final : valide la dernière ligne si elle n'est pas pleine
+  // (ex : une seule ligne avec 2 champs span-3 qui fait exactement 6,
+  //  ou une ligne incomplète comme un seul champ span-3)
   flushGrid();
 }
 
@@ -414,34 +449,38 @@ function buildChoiceSelect(col, currentVal, onChange) {
 // ── ChoiceList (multi) — tags + bouton "+" ──
 function buildChoiceList(col, currentVal, onChange) {
   let selected = Array.isArray(currentVal) ? [...currentVal]
-               : (currentVal && typeof currentVal==='string') ? currentVal.split(',').map(s=>s.trim()).filter(Boolean)
-               : [];
+    : (currentVal && typeof currentVal === 'string')
+      ? currentVal.split(',').map(s => s.trim()).filter(Boolean)
+      : [];
 
   const wrap = document.createElement('div');
   wrap.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;gap:4px;padding:3px 0;position:relative;';
 
-  // Dropdown caché
   const dropdown = document.createElement('div');
   dropdown.style.cssText = `
     display:none;position:absolute;top:calc(100% + 4px);left:0;z-index:150;min-width:160px;
     background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
     box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:4px;
   `;
+  // Le dropdown est ajouté UNE SEULE FOIS au wrap, ici, et n'en bouge plus jamais
+  wrap.appendChild(dropdown);
 
   const renderAll = () => {
-    // Vider sauf le dropdown
-    Array.from(wrap.children).forEach(c => { if(c!==dropdown) c.remove(); });
+    // On vide wrap SAUF le dropdown
+    Array.from(wrap.children).forEach(c => { if (c !== dropdown) c.remove(); });
 
-    // Tags existants
+    // Tags des valeurs sélectionnées — ajoutés avant le dropdown via appendChild
+    // mais comme dropdown est déjà dans wrap, ils se placent avant lui
     selected.forEach((s, i) => {
       const tag = makePill(s, '#e8f0fe', '#1a73e8', () => {
-        selected.splice(i,1); renderAll(); onChange([...selected]);
+        selected.splice(i, 1); renderAll(); onChange([...selected]);
       });
+      // On insère avant le dropdown qui est déjà dans le wrap
       wrap.insertBefore(tag, dropdown);
     });
 
-    // Bouton "+" pour ouvrir le dropdown
-    const remaining = (col.choices||[]).filter(c => !selected.includes(c));
+    // Bouton "+"
+    const remaining = (col.choices || []).filter(c => !selected.includes(c));
     if (remaining.length > 0) {
       const addBtn = document.createElement('button');
       addBtn.style.cssText = `
@@ -452,8 +491,8 @@ function buildChoiceList(col, currentVal, onChange) {
       `;
       addBtn.textContent = '+';
       addBtn.title = 'Ajouter une valeur';
-      addBtn.addEventListener('mouseenter', () => addBtn.style.background='var(--accent)' || (addBtn.style.color='#fff'));
-      addBtn.addEventListener('mouseleave', () => { addBtn.style.background='var(--accent-light)'; addBtn.style.color='var(--accent)'; });
+      addBtn.addEventListener('mouseenter', () => { addBtn.style.background = 'var(--accent)'; addBtn.style.color = '#fff'; });
+      addBtn.addEventListener('mouseleave', () => { addBtn.style.background = 'var(--accent-light)'; addBtn.style.color = 'var(--accent)'; });
 
       // Contenu du dropdown
       dropdown.innerHTML = '';
@@ -461,30 +500,32 @@ function buildChoiceList(col, currentVal, onChange) {
         const item = document.createElement('div');
         item.style.cssText = 'padding:5px 8px;cursor:pointer;font-size:12px;border-radius:2px;transition:background .1s;';
         item.textContent = choice;
-        item.addEventListener('mouseenter', () => item.style.background='var(--bg)');
-        item.addEventListener('mouseleave', () => item.style.background='');
-        item.addEventListener('mousedown', e => {
-          e.preventDefault();
-          selected.push(choice); renderAll(); onChange([...selected]);
-          dropdown.style.display='none';
+        item.addEventListener('mouseenter', () => item.style.background = 'var(--bg)');
+        item.addEventListener('mouseleave', () => item.style.background = '');
+        item.addEventListener('click', e => {
+          e.stopPropagation();
+          selected.push(choice);
+          renderAll();
+          onChange([...selected]);
+          dropdown.style.display = 'none';
         });
         dropdown.appendChild(item);
       });
 
       addBtn.addEventListener('click', e => {
         e.stopPropagation();
-        const isOpen = dropdown.style.display==='block';
-        dropdown.style.display = isOpen ? 'none' : 'block';
+        dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
       });
 
+      // Insère le bouton "+" avant le dropdown
       wrap.insertBefore(addBtn, dropdown);
     }
-
-    wrap.appendChild(dropdown);
   };
 
-  // Fermer le dropdown si on clique ailleurs
-  document.addEventListener('click', () => { dropdown.style.display='none'; }, { capture: true });
+  // Ferme le dropdown si clic en dehors
+  document.addEventListener('click', (e) => {
+    if (!wrap.contains(e.target)) dropdown.style.display = 'none';
+  });
 
   renderAll();
   return wrap;
