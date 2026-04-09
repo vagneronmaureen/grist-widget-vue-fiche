@@ -1,0 +1,5 @@
+{
+  "name": "Vue personalisée fiche - SDPC",
+  "description": "Vue fiche personnalisée pour le remplissage des informations des produits SDPC",
+  "entryPoint": "index.html"
+}
