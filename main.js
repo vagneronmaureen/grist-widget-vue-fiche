@@ -208,10 +208,12 @@ function updateSaveButtons() {
 }
 async function saveChanges() {
   if (!currentRecord || !tableId || !hasPendingChanges()) return;
+  const toSave = { ...pendingChanges };
+  pendingChanges = {}; updateSaveButtons();
   try {
-    await grist.docApi.applyUserActions([['UpdateRecord', tableId, currentRecord.id, pendingChanges]]);
-    pendingChanges = {}; updateSaveButtons(); showToast('✓ Modifications enregistrées');
-  } catch(e) { showToast('Erreur : '+e.message, 4000); }
+    await grist.docApi.applyUserActions([['UpdateRecord', tableId, currentRecord.id, toSave]]);
+    showToast('✓ Modifications enregistrées');
+  } catch(e) { pendingChanges = toSave; updateSaveButtons(); showToast('Erreur : '+e.message, 4000); }
 }
 function discardChanges() { pendingChanges = {}; updateSaveButtons(); renderForm(); }
 
@@ -455,7 +457,8 @@ function buildChoiceSelect(col, currentVal, onChange) {
 
 // ── ChoiceList (multi) — tags + bouton "+" ──
 function buildChoiceList(col, currentVal, onChange) {
-  let selected = Array.isArray(currentVal) ? [...currentVal]
+  let selected = Array.isArray(currentVal)
+    ? currentVal.filter(v => typeof v === 'string' && v !== 'L')
     : (currentVal && typeof currentVal === 'string')
       ? currentVal.split(',').map(s => s.trim()).filter(Boolean)
       : [];
@@ -480,7 +483,7 @@ function buildChoiceList(col, currentVal, onChange) {
     // mais comme dropdown est déjà dans wrap, ils se placent avant lui
     selected.forEach((s, i) => {
       const tag = makePill(s, '#e8f0fe', '#1a73e8', () => {
-        selected.splice(i, 1); renderAll(); onChange([...selected]);
+        selected.splice(i, 1); renderAll(); onChange(selected.length ? ['L', ...selected] : null);
       });
       // On insère avant le dropdown qui est déjà dans le wrap
       wrap.insertBefore(tag, dropdown);
@@ -513,7 +516,7 @@ function buildChoiceList(col, currentVal, onChange) {
           e.stopPropagation();
           selected.push(choice);
           renderAll();
-          onChange([...selected]);
+          onChange(selected.length ? ['L', ...selected] : null);
           dropdown.style.display = 'none';
         });
         dropdown.appendChild(item);
