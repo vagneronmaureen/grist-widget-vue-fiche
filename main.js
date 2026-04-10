@@ -388,7 +388,7 @@ function buildFieldCell(item, idx) {
 function formatValPreview(val, col, labelField) {
   if (val===null||val===undefined||val==='') return 'Non renseigné';
   if (col.kind==='ref')     return getRefLabel(col.refTable, val, labelField);
-  if (col.kind==='refList') return (Array.isArray(val)?val:[val]).map(id=>getRefLabel(col.refTable,id,labelField)).join(', ');
+  if (col.kind==='refList') return (Array.isArray(val)?val.filter(id=>typeof id==='number'&&id>0):[val]).map(id=>getRefLabel(col.refTable,id,labelField)).join(', ');
   if (Array.isArray(val))   return val.join(', ');
   return String(val);
 }
@@ -533,8 +533,15 @@ function buildChoiceList(col, currentVal, onChange) {
 
 // ── Référence avec recherche ──
 function buildRefSearch(col, currentVal, isMulti, labelField, onChange) {
+  // Pour RefList, Grist retourne ["L", id1, id2, ...] où "L" est un marqueur de type.
+  // Ce marqueur peut être la chaîne "L", null, ou un objet selon la version.
+  // On garde uniquement les entiers positifs valides.
+  const toRefIds = (val) => {
+    if (!Array.isArray(val)) return (val && typeof val === 'number' && val > 0) ? [val] : [];
+    return val.filter(id => typeof id === 'number' && id > 0);
+  };
   let selected = isMulti
-    ? (Array.isArray(currentVal) ? [...currentVal] : (currentVal ? [currentVal] : []))
+    ? toRefIds(currentVal)
     : (currentVal ? [currentVal] : []);
 
   const wrap = document.createElement('div');
@@ -550,7 +557,7 @@ function buildRefSearch(col, currentVal, isMulti, labelField, onChange) {
       const lbl = getRefLabel(col.refTable, id, labelField);
       const tag = makePill(lbl, '#e8f0fe', '#1a73e8', () => {
         selected.splice(i,1); renderTags();
-        onChange(isMulti ? [...selected] : (selected[0]??null));
+        onChange(isMulti ? ['L', ...selected] : (selected[0]??null));
       });
       tagsRow.appendChild(tag);
     });
@@ -600,7 +607,7 @@ function buildRefSearch(col, currentVal, isMulti, labelField, onChange) {
       item.addEventListener('mousedown', e => {
         e.preventDefault();
         if (isMulti) selected.push(row.id); else selected=[row.id];
-        renderTags(); onChange(isMulti ? [...selected] : selected[0]);
+        renderTags(); onChange(isMulti ? ['L', ...selected] : selected[0]);
         searchInp.value=''; dropdown.style.display='none';
       });
       dropdown.appendChild(item);
