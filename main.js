@@ -353,8 +353,15 @@ function buildFieldCell(item, idx) {
                  : (rawVal !== null && rawVal !== undefined ? rawVal : '');
   const kind   = col.kind || guessKind(rawVal);
 
+  const isEmpty = kind !== 'bool' && (
+    val === null || val === undefined || val === '' ||
+    (Array.isArray(val) && val.length === 0) ||
+    ((kind === 'ref' || kind === 'refList') && (val === 0 || val === null))
+  );
+
   const cell = document.createElement('div');
   cell.className = 'form-field'+(editMode?' draggable-el':'');
+  if (isEmpty && !editMode) cell.classList.add('field-empty');
   cell.dataset.idx = idx;
   if (editMode) setupDragEvents(cell, idx);
 
