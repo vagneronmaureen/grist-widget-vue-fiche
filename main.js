@@ -1,12 +1,13 @@
 // ══════════════════════════════════════════════
 // ÉTAT
 // ══════════════════════════════════════════════
-let allColumns     = [];   // [{ id, label, kind, choices?, refTable?, refLabelField? }]
-let allRecords     = [];
-let currentRecord  = null;
-let pendingChanges = {};
-let editMode       = false;
-let tableId        = null;
+let allColumns        = [];   // [{ id, label, kind, choices?, refTable?, refLabelField? }]
+let allRecords        = [];
+let currentRecord     = null;
+let pendingChanges    = {};
+let pendingSavedValues = null; // valeurs sauvegardées en attente de confirmation par onRecord
+let editMode          = false;
+let tableId           = null;
 
 // Données des tables référencées : { tableId: { columns: [], rows: [{id, ...fields}] } }
 let refData = {};
@@ -164,6 +165,14 @@ grist.onRecords(async (records) => {
 
 grist.onRecord((record) => {
   if (hasPendingChanges() && !confirm('Des modifications non enregistrées seront perdues. Continuer ?')) return;
+  // Si la ligne change, les valeurs sauvegardées ne s'appliquent plus
+  if (pendingSavedValues && currentRecord && record.id !== currentRecord.id) {
+    pendingSavedValues = null;
+  }
+  // Fusionner les valeurs sauvegardées pour protéger contre un onRecord périmé de Grist
+  if (pendingSavedValues) {
+    record = { ...record, ...pendingSavedValues };
+  }
   hide('loading'); hide('empty-state');
   el('product-form').style.display = 'block';
   currentRecord = record;
@@ -200,7 +209,7 @@ el('product-select').addEventListener('change', async (e) => {
 // MODIFICATIONS & SAUVEGARDE
 // ══════════════════════════════════════════════
 function hasPendingChanges() { return Object.keys(pendingChanges).length > 0; }
-function markDirty(colId, value) { pendingChanges[colId] = value; updateSaveButtons(); }
+function markDirty(colId, value) { pendingChanges[colId] = value; if (pendingSavedValues) delete pendingSavedValues[colId]; updateSaveButtons(); }
 function updateSaveButtons() {
   const d = hasPendingChanges();
   el('btn-save').classList.toggle('visible', d);
@@ -209,11 +218,14 @@ function updateSaveButtons() {
 async function saveChanges() {
   if (!currentRecord || !tableId || !hasPendingChanges()) return;
   const toSave = { ...pendingChanges };
+  pendingSavedValues = { ...pendingSavedValues, ...toSave }; // accumule les valeurs sauvegardées
   pendingChanges = {}; updateSaveButtons();
   try {
     await grist.docApi.applyUserActions([['UpdateRecord', tableId, currentRecord.id, toSave]]);
+    Object.assign(currentRecord, toSave);
+    renderForm();
     showToast('✓ Modifications enregistrées');
-  } catch(e) { pendingChanges = toSave; updateSaveButtons(); showToast('Erreur : '+e.message, 4000); }
+  } catch(e) { pendingSavedValues = null; pendingChanges = toSave; updateSaveButtons(); showToast('Erreur : '+e.message, 4000); }
 }
 function discardChanges() { pendingChanges = {}; updateSaveButtons(); renderForm(); }
 
