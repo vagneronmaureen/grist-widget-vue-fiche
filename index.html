@@ -149,6 +149,10 @@
   .form-field-textarea:focus  { border-bottom-color: var(--accent); }
   .form-field-input::placeholder,
   .form-field-textarea::placeholder { color: var(--text-muted); font-style: italic; }
+  /* Champ vide : fond rouge transparent */
+  .form-field.field-empty {
+    background: rgba(208, 2, 27, 0.05);
+  }
   .form-field-textarea { line-height: 1.5; min-height: 52px; }
   .form-field-check-wrap { display: flex; align-items: center; gap: 7px; padding: 3px 0; }
   input[type="checkbox"].grist-check {
