@@ -47,3 +47,4 @@ Nécessite un accès **full** à l'API Grist (`grist.ready({ requiredAccess: 'fu
 | Version | Description |
 |---|---|
 | v1.0 | Version initiale — layout configurable, tous types de champs |
+| v2.0 | Version avec un style Notion plus prononcé |
