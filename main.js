@@ -1,12 +1,13 @@
 // ══════════════════════════════════════════════
 // ÉTAT
 // ══════════════════════════════════════════════
-let allColumns     = [];   // [{ id, label, kind, choices?, refTable?, refLabelField? }]
-let allRecords     = [];
-let currentRecord  = null;
-let pendingChanges = {};
-let editMode       = false;
-let tableId        = null;
+let allColumns        = [];   // [{ id, label, kind, choices?, refTable?, refLabelField? }]
+let allRecords        = [];
+let currentRecord     = null;
+let pendingChanges    = {};
+let pendingSavedValues = null; // valeurs sauvegardées en attente de confirmation par onRecord
+let editMode          = false;
+let tableId           = null;
 
 // Données des tables référencées : { tableId: { columns: [], rows: [{id, ...fields}] } }
 let refData = {};
@@ -164,6 +165,14 @@ grist.onRecords(async (records) => {
 
 grist.onRecord((record) => {
   if (hasPendingChanges() && !confirm('Des modifications non enregistrées seront perdues. Continuer ?')) return;
+  // Si la ligne change, les valeurs sauvegardées ne s'appliquent plus
+  if (pendingSavedValues && currentRecord && record.id !== currentRecord.id) {
+    pendingSavedValues = null;
+  }
+  // Fusionner les valeurs sauvegardées pour protéger contre un onRecord périmé de Grist
+  if (pendingSavedValues) {
+    record = { ...record, ...pendingSavedValues };
+  }
   hide('loading'); hide('empty-state');
   el('product-form').style.display = 'block';
   currentRecord = record;
@@ -200,7 +209,7 @@ el('product-select').addEventListener('change', async (e) => {
 // MODIFICATIONS & SAUVEGARDE
 // ══════════════════════════════════════════════
 function hasPendingChanges() { return Object.keys(pendingChanges).length > 0; }
-function markDirty(colId, value) { pendingChanges[colId] = value; updateSaveButtons(); }
+function markDirty(colId, value) { pendingChanges[colId] = value; if (pendingSavedValues) delete pendingSavedValues[colId]; updateSaveButtons(); }
 function updateSaveButtons() {
   const d = hasPendingChanges();
   el('btn-save').classList.toggle('visible', d);
@@ -208,10 +217,15 @@ function updateSaveButtons() {
 }
 async function saveChanges() {
   if (!currentRecord || !tableId || !hasPendingChanges()) return;
+  const toSave = { ...pendingChanges };
+  pendingSavedValues = { ...pendingSavedValues, ...toSave }; // accumule les valeurs sauvegardées
+  pendingChanges = {}; updateSaveButtons();
   try {
-    await grist.docApi.applyUserActions([['UpdateRecord', tableId, currentRecord.id, pendingChanges]]);
-    pendingChanges = {}; updateSaveButtons(); showToast('✓ Modifications enregistrées');
-  } catch(e) { showToast('Erreur : '+e.message, 4000); }
+    await grist.docApi.applyUserActions([['UpdateRecord', tableId, currentRecord.id, toSave]]);
+    Object.assign(currentRecord, toSave);
+    renderForm();
+    showToast('✓ Modifications enregistrées');
+  } catch(e) { pendingSavedValues = null; pendingChanges = toSave; updateSaveButtons(); showToast('Erreur : '+e.message, 4000); }
 }
 function discardChanges() { pendingChanges = {}; updateSaveButtons(); renderForm(); }
 
@@ -395,7 +409,7 @@ function buildFieldCell(item, idx) {
 function formatValPreview(val, col, labelField) {
   if (val===null||val===undefined||val==='') return 'Non renseigné';
   if (col.kind==='ref')     return getRefLabel(col.refTable, val, labelField);
-  if (col.kind==='refList') return (Array.isArray(val)?val:[val]).map(id=>getRefLabel(col.refTable,id,labelField)).join(', ');
+  if (col.kind==='refList') return (Array.isArray(val)?val.filter(id=>typeof id==='number'&&id>0):[val]).map(id=>getRefLabel(col.refTable,id,labelField)).join(', ');
   if (Array.isArray(val))   return val.join(', ');
   return String(val);
 }
@@ -455,7 +469,8 @@ function buildChoiceSelect(col, currentVal, onChange) {
 
 // ── ChoiceList (multi) — tags + bouton "+" ──
 function buildChoiceList(col, currentVal, onChange) {
-  let selected = Array.isArray(currentVal) ? [...currentVal]
+  let selected = Array.isArray(currentVal)
+    ? currentVal.filter(v => typeof v === 'string' && v !== 'L')
     : (currentVal && typeof currentVal === 'string')
       ? currentVal.split(',').map(s => s.trim()).filter(Boolean)
       : [];
@@ -480,7 +495,7 @@ function buildChoiceList(col, currentVal, onChange) {
     // mais comme dropdown est déjà dans wrap, ils se placent avant lui
     selected.forEach((s, i) => {
       const tag = makePill(s, '#e8f0fe', '#1a73e8', () => {
-        selected.splice(i, 1); renderAll(); onChange([...selected]);
+        selected.splice(i, 1); renderAll(); onChange(selected.length ? ['L', ...selected] : null);
       });
       // On insère avant le dropdown qui est déjà dans le wrap
       wrap.insertBefore(tag, dropdown);
@@ -513,7 +528,7 @@ function buildChoiceList(col, currentVal, onChange) {
           e.stopPropagation();
           selected.push(choice);
           renderAll();
-          onChange([...selected]);
+          onChange(selected.length ? ['L', ...selected] : null);
           dropdown.style.display = 'none';
         });
         dropdown.appendChild(item);
@@ -540,8 +555,15 @@ function buildChoiceList(col, currentVal, onChange) {
 
 // ── Référence avec recherche ──
 function buildRefSearch(col, currentVal, isMulti, labelField, onChange) {
+  // Pour RefList, Grist retourne ["L", id1, id2, ...] où "L" est un marqueur de type.
+  // Ce marqueur peut être la chaîne "L", null, ou un objet selon la version.
+  // On garde uniquement les entiers positifs valides.
+  const toRefIds = (val) => {
+    if (!Array.isArray(val)) return (val && typeof val === 'number' && val > 0) ? [val] : [];
+    return val.filter(id => typeof id === 'number' && id > 0);
+  };
   let selected = isMulti
-    ? (Array.isArray(currentVal) ? [...currentVal] : (currentVal ? [currentVal] : []))
+    ? toRefIds(currentVal)
     : (currentVal ? [currentVal] : []);
 
   const wrap = document.createElement('div');
@@ -557,7 +579,7 @@ function buildRefSearch(col, currentVal, isMulti, labelField, onChange) {
       const lbl = getRefLabel(col.refTable, id, labelField);
       const tag = makePill(lbl, '#e8f0fe', '#1a73e8', () => {
         selected.splice(i,1); renderTags();
-        onChange(isMulti ? [...selected] : (selected[0]??null));
+        onChange(isMulti ? ['L', ...selected] : (selected[0]??null));
       });
       tagsRow.appendChild(tag);
     });
@@ -607,7 +629,7 @@ function buildRefSearch(col, currentVal, isMulti, labelField, onChange) {
       item.addEventListener('mousedown', e => {
         e.preventDefault();
         if (isMulti) selected.push(row.id); else selected=[row.id];
-        renderTags(); onChange(isMulti ? [...selected] : selected[0]);
+        renderTags(); onChange(isMulti ? ['L', ...selected] : selected[0]);
         searchInp.value=''; dropdown.style.display='none';
       });
       dropdown.appendChild(item);
