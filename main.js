@@ -549,10 +549,15 @@ function buildBool(col, val) {
 }
 
 function buildText(col, val) {
-  const inp = document.createElement('input');
-  inp.type='text'; inp.className='form-field-input'; inp.value=val||''; inp.placeholder='Non renseigné';
-  inp.addEventListener('input', () => markDirty(col.id, inp.value));
-  return inp;
+  const ta = document.createElement('textarea');
+  ta.className='form-field-textarea'; ta.value=val||''; ta.rows=1; ta.placeholder='Non renseigné';
+  ta.style.minHeight = '22px';
+  ta.addEventListener('input', () => {
+    ta.style.height='auto'; ta.style.height=ta.scrollHeight+'px';
+    markDirty(col.id, ta.value);
+  });
+  setTimeout(() => { ta.style.height='auto'; ta.style.height=ta.scrollHeight+'px'; }, 0);
+  return ta;
 }
 
 function buildNumber(col, val) {

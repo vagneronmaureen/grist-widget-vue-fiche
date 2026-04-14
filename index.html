@@ -175,10 +175,14 @@
   .section-block {
     border-radius: 8px;
     margin: 6px 0;
-    overflow: hidden;
+    /* pas d'overflow:hidden — évite de clipper les dropdowns positionnés en absolu */
   }
   .section-block:first-child { margin-top: 0; }
   .section-block:last-child  { margin-bottom: 0; }
+  /* Arrondir les coins de l'en-tête (pour les sections colorées) */
+  .section-block .section-header { border-radius: 8px 8px 0 0; }
+  .section-block.collapsed .section-header,
+  .section-block > .section-header:only-of-type { border-radius: 8px; }
 
   /* Dans un bloc coloré, les grilles n'ont pas de border-top (le fond fait la séparation) */
   .section-block.has-color .form-grid { border-top-color: transparent; }
