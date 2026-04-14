@@ -12,8 +12,21 @@ let tableId           = null;
 // Données des tables référencées : { tableId: { columns: [], rows: [{id, ...fields}] } }
 let refData = {};
 
-// Layout item : { id, kind, colId?, label?, span?, refLabelField? }
+// Layout item : { id, kind, colId?, label?, span?, refLabelField?, collapsed?, bgColor? }
 let layout = [];
+
+// Palette Notion (clés utilisées comme data-color et pour le color picker)
+const NOTION_COLORS = [
+  { key:'gray',   bg:'#F1F1EF' },
+  { key:'brown',  bg:'#F4EEEE' },
+  { key:'orange', bg:'#FAEBDD' },
+  { key:'yellow', bg:'#FBF3DB' },
+  { key:'green',  bg:'#EDF3EC' },
+  { key:'blue',   bg:'#E7F3F8' },
+  { key:'purple', bg:'#F4F0F9' },
+  { key:'pink',   bg:'#FBE2E9' },
+  { key:'red',    bg:'#FDEBEC' },
+];
 let _idCounter = 1;
 function newId() { return _idCounter++; }
 
@@ -247,7 +260,7 @@ function toggleEditMode() {
 function renderForm() {
   const form = el('product-form');
   form.innerHTML = '';
-  if (editMode) form.classList.add('edit-mode'); 
+  if (editMode) form.classList.add('edit-mode');
   else form.classList.remove('edit-mode');
 
   if (layout.length === 0) {
@@ -256,20 +269,21 @@ function renderForm() {
     return;
   }
 
-  let isFirst  = true;  // pour le style du premier élément (pas de border-top)
-  let grid     = null;  // la ligne <div> en cours de construction (null = pas encore commencée)
-  let usedCols = 0;     // nb de colonnes occupées dans la ligne en cours (max 6)
+  let isFirst          = true;   // pour le style du premier élément (pas de border-top)
+  let grid             = null;   // la ligne <div> en cours de construction
+  let usedCols         = 0;      // nb de colonnes occupées dans la ligne en cours (max 6)
+  let currentContainer = form;   // où appender les items non-titre (form ou section-body)
 
-  // Ajoute la ligne en cours au formulaire et remet les compteurs à zéro
+  // Ajoute la ligne en cours au conteneur courant et remet les compteurs à zéro
   const flushGrid = () => {
     if (grid) {
-      form.appendChild(grid);
+      currentContainer.appendChild(grid);
       grid     = null;
       usedCols = 0;
     }
   };
 
-  // Retourne la ligne en cours, ou en crée une nouvelle si elle n'existe pas encore
+  // Retourne la ligne en cours, ou en crée une nouvelle
   const getGrid = () => {
     if (!grid) {
       grid = document.createElement('div');
@@ -282,17 +296,52 @@ function renderForm() {
 
     // ── TITRE DE SECTION ──────────────────────────────────────────
     if (item.kind === 'title') {
-      flushGrid(); // on termine la ligne de champs en cours avant le titre
-      const div = makeEl('div', 'form-section-title' + (isFirst ? ' first-el' : ''), idx);
+      flushGrid();
+
+      // Migration inline : s'assure que les nouvelles propriétés existent
+      if (item.collapsed === undefined) item.collapsed = false;
+      if (item.bgColor   === undefined) item.bgColor   = null;
+
+      // Bloc section (wrapper)
+      const block = document.createElement('div');
+      block.className = 'section-block' + (item.bgColor ? ' has-color' : '');
+      if (item.bgColor) block.dataset.color = item.bgColor;
+      if (!editMode && item.collapsed) block.classList.add('collapsed');
+
+      // En-tête
+      const header = document.createElement('div');
+      header.className = 'section-header' + (isFirst ? ' first-el' : '') + (!editMode ? ' toggleable' : '');
+      header.dataset.idx = idx;
+
+      // Flèche toggle
+      const arrow = document.createElement('span');
+      arrow.className = 'section-toggle-arrow' + (editMode || !item.collapsed ? ' expanded' : '');
+      arrow.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4l4 4 4-4"/></svg>`;
+      header.appendChild(arrow);
+
       if (editMode) {
         const inp = inlineInput('700', '13px', 'var(--text)', item.label || 'Section');
         inp.addEventListener('change', e => { layout[idx].label = e.target.value; saveLayout(); });
-        div.appendChild(inp);
+        header.appendChild(inp);
+        header.classList.add('draggable-el');
+        setupDragEvents(header, idx);
+        addOverlay(header, idx);
       } else {
-        div.textContent = item.label || 'Section';
+        const lbl = document.createElement('span');
+        lbl.textContent = item.label || 'Section';
+        header.appendChild(lbl);
+        header.addEventListener('click', () => toggleSection(idx, block, arrow));
       }
-      if (editMode) addOverlay(div, idx);
-      form.appendChild(div);
+
+      // Corps de section
+      const body = document.createElement('div');
+      body.className = 'section-body';
+
+      block.appendChild(header);
+      block.appendChild(body);
+      form.appendChild(block);
+
+      currentContainer = body;
       isFirst = false;
 
     // ── TEXTE DESCRIPTIF ──────────────────────────────────────────
@@ -307,20 +356,19 @@ function renderForm() {
         div.textContent = item.label || '';
       }
       if (editMode) addOverlay(div, idx);
-      form.appendChild(div);
+      currentContainer.appendChild(div);
 
     // ── SÉPARATEUR HORIZONTAL ─────────────────────────────────────
     } else if (item.kind === 'separator') {
       flushGrid();
       const div = makeEl('div', 'form-separator', idx);
       if (editMode) addOverlay(div, idx);
-      form.appendChild(div);
+      currentContainer.appendChild(div);
 
     // ── CHAMP ─────────────────────────────────────────────────────
     } else if (item.kind === 'field') {
-      const span = Math.min(item.span || 3, 6); // sécurité : jamais plus de 6
+      const span = Math.min(item.span || 3, 6);
 
-      // Si ce champ ne rentre pas dans la ligne en cours → on flush et on repart
       if (usedCols + span > 6) flushGrid();
 
       const cell = buildFieldCell(item, idx);
@@ -331,10 +379,65 @@ function renderForm() {
     }
   });
 
-  // Flush final : valide la dernière ligne si elle n'est pas pleine
-  // (ex : une seule ligne avec 2 champs span-3 qui fait exactement 6,
-  //  ou une ligne incomplète comme un seul champ span-3)
   flushGrid();
+}
+
+// Toggle collapse/expand d'une section en view mode
+function toggleSection(idx, blockEl, arrowEl) {
+  if (editMode) return;
+  layout[idx].collapsed = !layout[idx].collapsed;
+  saveLayout();
+  blockEl.classList.toggle('collapsed', layout[idx].collapsed);
+  arrowEl.classList.toggle('expanded',  !layout[idx].collapsed);
+}
+
+// Popover de sélection de couleur pour une section
+function showColorPicker(idx, anchorBtn) {
+  document.querySelectorAll('.color-picker-popover').forEach(p => p.remove());
+
+  const item = layout[idx];
+  const popover = document.createElement('div');
+  popover.className = 'color-picker-popover';
+
+  // Swatch "aucune couleur"
+  const noneSwatch = document.createElement('div');
+  noneSwatch.className = 'color-swatch color-swatch-none' + (!item.bgColor ? ' selected' : '');
+  noneSwatch.title = 'Aucune couleur';
+  noneSwatch.addEventListener('click', e => {
+    e.stopPropagation();
+    layout[idx].bgColor = null;
+    saveLayout(); renderForm();
+  });
+  popover.appendChild(noneSwatch);
+
+  // Swatches Notion
+  NOTION_COLORS.forEach(({ key, bg }) => {
+    const sw = document.createElement('div');
+    sw.className = 'color-swatch' + (item.bgColor === key ? ' selected' : '');
+    sw.style.background = bg;
+    sw.title = key;
+    sw.addEventListener('click', e => {
+      e.stopPropagation();
+      layout[idx].bgColor = key;
+      saveLayout(); renderForm();
+    });
+    popover.appendChild(sw);
+  });
+
+  // Position fixed calée sur le bouton
+  const rect = anchorBtn.getBoundingClientRect();
+  popover.style.top  = (rect.bottom + 4) + 'px';
+  popover.style.left = Math.max(4, rect.right - 176) + 'px';
+  document.body.appendChild(popover);
+
+  // Fermeture sur clic extérieur
+  const close = e => {
+    if (!popover.contains(e.target)) {
+      popover.remove();
+      document.removeEventListener('click', close, true);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', close, true), 0);
 }
 
 function inlineInput(weight, size, color, value) {
@@ -686,7 +789,16 @@ function addOverlay(div, idx) {
   </svg>`;
   tb.appendChild(handle);
 
-  if (item.kind === 'field') {
+  if (item.kind === 'title') {
+    // Bouton color picker pour les titres de section
+    const colorBtn = tbBtn('🎨 Couleur', false);
+    colorBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      showColorPicker(idx, colorBtn);
+    });
+    tb.appendChild(colorBtn);
+
+  } else if (item.kind === 'field') {
     const col = allColumns.find(c => c.id === item.colId);
 
     // Boutons largeur
@@ -698,7 +810,6 @@ function addOverlay(div, idx) {
 
     // Bouton champ de recherche (Ref / RefList uniquement)
     if (col && (col.kind==='ref'||col.kind==='refList') && col.refTable && refData[col.refTable]) {
-      const refCols = refData[col.refTable].columns;
       const pickBtn = tbBtn('🔍 Champ de recherche', false);
       pickBtn.addEventListener('click', e => {
         e.stopPropagation();
@@ -716,6 +827,7 @@ function addOverlay(div, idx) {
     });
     tb.appendChild(renBtn);
   }
+  // desc et separator : uniquement drag handle + supprimer
 
   // Supprimer
   const delBtn = tbBtn('✕ Supprimer', false, true);
@@ -829,7 +941,9 @@ function setupDragEvents(div, idx) {
 // ══════════════════════════════════════════════
 function addItem(kind) {
   const defaults = { title:'Nouvelle section', desc:'Description…', separator:'' };
-  layout.push({ id:newId(), kind, label:defaults[kind]??'', span:kind==='field'?3:undefined });
+  const item = { id:newId(), kind, label:defaults[kind]??'', span:kind==='field'?3:undefined };
+  if (kind === 'title') { item.collapsed = false; item.bgColor = null; }
+  layout.push(item);
   saveLayout(); renderForm();
 }
 
