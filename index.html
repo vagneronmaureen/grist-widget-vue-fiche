@@ -19,6 +19,16 @@
     --shadow:       0 1px 4px rgba(0,0,0,0.07);
     --r:            3px;
     --font:         -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    /* Palette Notion */
+    --notion-gray-bg:#F1F1EF;   --notion-gray-hd:#E9E9E7;
+    --notion-brown-bg:#F4EEEE;  --notion-brown-hd:#EEE4E1;
+    --notion-orange-bg:#FAEBDD; --notion-orange-hd:#F7DFCA;
+    --notion-yellow-bg:#FBF3DB; --notion-yellow-hd:#F8EABE;
+    --notion-green-bg:#EDF3EC;  --notion-green-hd:#DFF0DE;
+    --notion-blue-bg:#E7F3F8;   --notion-blue-hd:#D5EBF5;
+    --notion-purple-bg:#F4F0F9; --notion-purple-hd:#EAE4F5;
+    --notion-pink-bg:#FBE2E9;   --notion-pink-hd:#F7D0DC;
+    --notion-red-bg:#FDEBEC;    --notion-red-hd:#FAD7D9;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -149,9 +159,9 @@
   .form-field-textarea:focus  { border-bottom-color: var(--accent); }
   .form-field-input::placeholder,
   .form-field-textarea::placeholder { color: var(--text-muted); font-style: italic; }
-  /* Champ vide : fond rouge transparent */
+  /* Champ vide : bordure gauche rouge (lisible sur tous les fonds) */
   .form-field.field-empty {
-    background: rgba(208, 2, 27, 0.05);
+    border-left: 2px solid var(--danger);
   }
   .form-field-textarea { line-height: 1.5; min-height: 52px; }
   .form-field-check-wrap { display: flex; align-items: center; gap: 7px; padding: 3px 0; }
@@ -159,7 +169,79 @@
     width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer;
   }
 
-  /* Titre de section */
+  /* ══ BLOCS SECTION (style Notion) ══ */
+
+  /* Wrapper qui englobe un titre + tout son contenu */
+  .section-block {
+    border-radius: 8px;
+    margin: 6px 0;
+    /* pas d'overflow:hidden — évite de clipper les dropdowns positionnés en absolu */
+  }
+  .section-block:first-child { margin-top: 0; }
+  .section-block:last-child  { margin-bottom: 0; }
+  /* Arrondir les coins de l'en-tête (pour les sections colorées) */
+  .section-block .section-header { border-radius: 8px 8px 0 0; }
+  .section-block.collapsed .section-header,
+  .section-block > .section-header:only-of-type { border-radius: 8px; }
+
+  /* Dans un bloc coloré, les grilles n'ont pas de border-top (le fond fait la séparation) */
+  .section-block.has-color .form-grid { border-top-color: transparent; }
+
+  /* Premier grid dans un section-body : pas de border-top */
+  .section-body .form-grid:first-child { border-top: none; }
+
+  /* Couleurs de fond (data-color sur .section-block) */
+  .section-block[data-color="gray"]   { background: var(--notion-gray-bg); }
+  .section-block[data-color="brown"]  { background: var(--notion-brown-bg); }
+  .section-block[data-color="orange"] { background: var(--notion-orange-bg); }
+  .section-block[data-color="yellow"] { background: var(--notion-yellow-bg); }
+  .section-block[data-color="green"]  { background: var(--notion-green-bg); }
+  .section-block[data-color="blue"]   { background: var(--notion-blue-bg); }
+  .section-block[data-color="purple"] { background: var(--notion-purple-bg); }
+  .section-block[data-color="pink"]   { background: var(--notion-pink-bg); }
+  .section-block[data-color="red"]    { background: var(--notion-red-bg); }
+
+  /* En-tête de section légèrement plus sombre quand colorée */
+  .section-block[data-color="gray"]   .section-header { background: var(--notion-gray-hd); }
+  .section-block[data-color="brown"]  .section-header { background: var(--notion-brown-hd); }
+  .section-block[data-color="orange"] .section-header { background: var(--notion-orange-hd); }
+  .section-block[data-color="yellow"] .section-header { background: var(--notion-yellow-hd); }
+  .section-block[data-color="green"]  .section-header { background: var(--notion-green-hd); }
+  .section-block[data-color="blue"]   .section-header { background: var(--notion-blue-hd); }
+  .section-block[data-color="purple"] .section-header { background: var(--notion-purple-hd); }
+  .section-block[data-color="pink"]   .section-header { background: var(--notion-pink-hd); }
+  .section-block[data-color="red"]    .section-header { background: var(--notion-red-hd); }
+
+  /* En-tête de section (remplace .form-section-title) */
+  .section-header {
+    display: flex; align-items: center; gap: 6px;
+    padding: 14px 16px 10px; font-size: 13px; font-weight: 700;
+    color: var(--text); border-top: 1px solid var(--border);
+    position: relative; user-select: none;
+  }
+  .section-header.first-el { border-top: none; }
+  /* Dans un section-block, le bloc lui-même gère la séparation */
+  .section-block .section-header { border-top: none; }
+  .section-header.toggleable { cursor: pointer; }
+
+  /* Flèche toggle */
+  .section-toggle-arrow {
+    width: 16px; height: 16px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-label);
+    transition: transform 0.2s ease;
+    transform: rotate(-90deg); /* replié = pointe à droite */
+  }
+  .section-toggle-arrow.expanded { transform: rotate(0deg); } /* déplié = pointe en bas */
+
+  /* Corps de section masqué quand collapsed (view mode uniquement) */
+  .section-block.collapsed .section-body { display: none; }
+
+  /* Edit mode : toggle désactivé */
+  .edit-mode .section-header { cursor: default; }
+  .edit-mode .section-toggle-arrow { pointer-events: none; opacity: 0.4; }
+
+  /* Compatibilité : ancien .form-section-title (items sans section-block) */
   .form-section-title {
     padding: 18px 20px 6px; font-size: 13px; font-weight: 700; color: var(--text);
     border-top: 1px solid var(--border); position: relative;
@@ -172,8 +254,53 @@
     line-height: 1.55; position: relative;
   }
 
-  /* Séparateur */
-  .form-separator { height: 1px; background: var(--border); margin: 6px 0; position: relative; }
+  /* Séparateur — padding invisible pour agrandir la zone de survol */
+  .form-separator {
+    position: relative;
+    padding: 9px 20px;
+    margin: 0;
+    display: flex;
+    align-items: center;
+  }
+  .form-separator::before {
+    content: '';
+    display: block;
+    height: 1.5px;
+    width: 100%;
+    background: var(--border);
+    border-radius: 2px;
+  }
+  /* En mode édition : tirets pour signaler l'élément draggable */
+  .edit-mode .form-separator::before {
+    background: repeating-linear-gradient(
+      to right,
+      var(--border) 0px, var(--border) 8px,
+      transparent 8px, transparent 14px
+    );
+  }
+
+  /* ══ COLOR PICKER POPOVER ══ */
+  .color-picker-popover {
+    position: fixed; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.14);
+    padding: 8px; display: flex; flex-wrap: wrap; gap: 5px;
+    width: 176px; z-index: 100;
+  }
+  .color-swatch {
+    width: 24px; height: 24px; border-radius: 4px;
+    border: 2px solid transparent; cursor: pointer;
+    transition: transform 0.1s, border-color 0.1s;
+  }
+  .color-swatch:hover { transform: scale(1.15); }
+  .color-swatch.selected { border-color: var(--text); }
+  .color-swatch-none {
+    background: white; border: 2px solid var(--border); position: relative;
+  }
+  .color-swatch-none::after {
+    content: ''; position: absolute; inset: 2px;
+    background: linear-gradient(to bottom right, transparent 45%, var(--danger) 45%, var(--danger) 55%, transparent 55%);
+  }
 
   /* ══ OVERLAYS MODE ÉDITION ══ */
 
@@ -341,6 +468,32 @@
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+  /* ══ RICH TEXT TOOLBAR (flottante sur sélection) ══ */
+  #rich-toolbar {
+    display: none;
+    position: fixed;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.13);
+    z-index: 300;
+    flex-direction: row;
+    overflow: hidden;
+    pointer-events: all;
+  }
+  #rich-toolbar button {
+    width: 28px; height: 26px;
+    border: none; border-right: 1px solid var(--border);
+    background: var(--surface); color: var(--text);
+    cursor: pointer; font-family: var(--font); font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.1s;
+    padding: 0;
+  }
+  #rich-toolbar button:last-child { border-right: none; }
+  #rich-toolbar button:hover { background: var(--bg); }
+  #rich-toolbar button.rt-active { background: var(--accent-light); color: var(--accent); }
+
   ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
@@ -408,6 +561,13 @@
       <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="2" width="12" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7.75 5a.75.75 0 01.75.75V7h1.25a.75.75 0 010 1.5H8.5v1.25a.75.75 0 01-1.5 0V8.5H5.75a.75.75 0 010-1.5H7V5.75A.75.75 0 017.75 5z"/></svg>
       Champ
     </button>
+    <div style="flex:1"></div>
+    <button class="add-btn" style="border-color:var(--danger);color:var(--danger)" onclick="resetLayout()"
+      onmouseover="this.style.background='#fde8ea';this.style.borderStyle='solid'"
+      onmouseout="this.style.background='transparent';this.style.borderStyle='dashed'">
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z"/></svg>
+      Tout retirer
+    </button>
   </div>
 
 </div>
@@ -424,6 +584,13 @@
     </div>
     <div class="picker-list" id="picker-list"></div>
   </div>
+</div>
+
+<!-- Barre de mise en forme rich text (apparaît sur sélection en mode config) -->
+<div id="rich-toolbar">
+  <button data-cmd="bold" title="Gras"><b>B</b></button>
+  <button data-cmd="italic" title="Italique"><i>I</i></button>
+  <button data-cmd="underline" title="Souligné"><u>U</u></button>
 </div>
 
 <div id="toast"></div>

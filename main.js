@@ -12,8 +12,25 @@ let tableId           = null;
 // Données des tables référencées : { tableId: { columns: [], rows: [{id, ...fields}] } }
 let refData = {};
 
-// Layout item : { id, kind, colId?, label?, span?, refLabelField? }
+// Layout item : { id, kind, colId?, label?, span?, refLabelField?, collapsed?, bgColor? }
 let layout = [];
+
+// Tailles de police pour titres et descriptions
+const TITLE_SIZES = { s:'11px', m:'13px', l:'16px', xl:'20px' };
+const DESC_SIZES  = { s:'10px', m:'12px', l:'14px' };
+
+// Palette Notion (clés utilisées comme data-color et pour le color picker)
+const NOTION_COLORS = [
+  { key:'gray',   bg:'#F1F1EF' },
+  { key:'brown',  bg:'#F4EEEE' },
+  { key:'orange', bg:'#FAEBDD' },
+  { key:'yellow', bg:'#FBF3DB' },
+  { key:'green',  bg:'#EDF3EC' },
+  { key:'blue',   bg:'#E7F3F8' },
+  { key:'purple', bg:'#F4F0F9' },
+  { key:'pink',   bg:'#FBE2E9' },
+  { key:'red',    bg:'#FDEBEC' },
+];
 let _idCounter = 1;
 function newId() { return _idCounter++; }
 
@@ -247,7 +264,7 @@ function toggleEditMode() {
 function renderForm() {
   const form = el('product-form');
   form.innerHTML = '';
-  if (editMode) form.classList.add('edit-mode'); 
+  if (editMode) form.classList.add('edit-mode');
   else form.classList.remove('edit-mode');
 
   if (layout.length === 0) {
@@ -256,20 +273,21 @@ function renderForm() {
     return;
   }
 
-  let isFirst  = true;  // pour le style du premier élément (pas de border-top)
-  let grid     = null;  // la ligne <div> en cours de construction (null = pas encore commencée)
-  let usedCols = 0;     // nb de colonnes occupées dans la ligne en cours (max 6)
+  let isFirst          = true;   // pour le style du premier élément (pas de border-top)
+  let grid             = null;   // la ligne <div> en cours de construction
+  let usedCols         = 0;      // nb de colonnes occupées dans la ligne en cours (max 6)
+  let currentContainer = form;   // où appender les items non-titre (form ou section-body)
 
-  // Ajoute la ligne en cours au formulaire et remet les compteurs à zéro
+  // Ajoute la ligne en cours au conteneur courant et remet les compteurs à zéro
   const flushGrid = () => {
     if (grid) {
-      form.appendChild(grid);
+      currentContainer.appendChild(grid);
       grid     = null;
       usedCols = 0;
     }
   };
 
-  // Retourne la ligne en cours, ou en crée une nouvelle si elle n'existe pas encore
+  // Retourne la ligne en cours, ou en crée une nouvelle
   const getGrid = () => {
     if (!grid) {
       grid = document.createElement('div');
@@ -282,45 +300,93 @@ function renderForm() {
 
     // ── TITRE DE SECTION ──────────────────────────────────────────
     if (item.kind === 'title') {
-      flushGrid(); // on termine la ligne de champs en cours avant le titre
-      const div = makeEl('div', 'form-section-title' + (isFirst ? ' first-el' : ''), idx);
+      flushGrid();
+
+      // Migration inline : s'assure que les nouvelles propriétés existent
+      if (item.collapsed === undefined) item.collapsed = false;
+      if (item.bgColor   === undefined) item.bgColor   = null;
+
+      // Bloc section (wrapper)
+      const block = document.createElement('div');
+      block.className = 'section-block' + (item.bgColor ? ' has-color' : '');
+      if (item.bgColor) block.dataset.color = item.bgColor;
+      if (!editMode && item.collapsed) block.classList.add('collapsed');
+
+      // En-tête
+      const header = document.createElement('div');
+      header.className = 'section-header' + (isFirst ? ' first-el' : '') + (!editMode ? ' toggleable' : '');
+      header.dataset.idx = idx;
+
+      // Flèche toggle
+      const arrow = document.createElement('span');
+      arrow.className = 'section-toggle-arrow' + (editMode || !item.collapsed ? ' expanded' : '');
+      arrow.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4l4 4 4-4"/></svg>`;
+      header.appendChild(arrow);
+
+      const titleSize = TITLE_SIZES[item.fontSize] || TITLE_SIZES.m;
+      header.style.fontSize = titleSize;
+
       if (editMode) {
-        const inp = inlineInput('700', '13px', 'var(--text)', item.label || 'Section');
-        inp.addEventListener('change', e => { layout[idx].label = e.target.value; saveLayout(); });
-        div.appendChild(inp);
+        const ce = document.createElement('div');
+        ce.contentEditable = 'true';
+        ce.innerHTML = item.label || 'Section';
+        ce.dataset.layoutIdx = idx;
+        ce.style.cssText = 'outline:none;flex:1;min-width:0;';
+        ce.addEventListener('keydown', e => { if (e.key === 'Enter') e.preventDefault(); });
+        ce.addEventListener('input', () => { layout[idx].label = ce.innerHTML; saveLayout(); });
+        header.appendChild(ce);
+        header.classList.add('draggable-el');
+        setupDragEvents(header, idx);
+        addOverlay(header, idx);
       } else {
-        div.textContent = item.label || 'Section';
+        const lbl = document.createElement('span');
+        lbl.innerHTML = item.label || 'Section';
+        header.appendChild(lbl);
+        header.addEventListener('click', () => toggleSection(idx, block, arrow));
       }
-      if (editMode) addOverlay(div, idx);
-      form.appendChild(div);
+
+      // Corps de section
+      const body = document.createElement('div');
+      body.className = 'section-body';
+
+      block.appendChild(header);
+      block.appendChild(body);
+      form.appendChild(block);
+
+      currentContainer = body;
       isFirst = false;
 
     // ── TEXTE DESCRIPTIF ──────────────────────────────────────────
     } else if (item.kind === 'desc') {
       flushGrid();
       const div = makeEl('div', 'form-section-desc', idx);
+      const descSize = DESC_SIZES[item.fontSize] || DESC_SIZES.m;
+      div.style.fontSize = descSize;
       if (editMode) {
-        const ta = inlineTextarea('400', '12px', 'var(--text-label)', item.label || '');
-        ta.addEventListener('change', e => { layout[idx].label = e.target.value; saveLayout(); });
-        div.appendChild(ta);
+        const ce = document.createElement('div');
+        ce.contentEditable = 'true';
+        ce.innerHTML = item.label || '';
+        ce.dataset.layoutIdx = idx;
+        ce.style.cssText = 'outline:none;width:100%;min-height:1.4em;';
+        ce.addEventListener('input', () => { layout[idx].label = ce.innerHTML; saveLayout(); });
+        div.appendChild(ce);
       } else {
-        div.textContent = item.label || '';
+        div.innerHTML = item.label || '';
       }
       if (editMode) addOverlay(div, idx);
-      form.appendChild(div);
+      currentContainer.appendChild(div);
 
     // ── SÉPARATEUR HORIZONTAL ─────────────────────────────────────
     } else if (item.kind === 'separator') {
       flushGrid();
       const div = makeEl('div', 'form-separator', idx);
       if (editMode) addOverlay(div, idx);
-      form.appendChild(div);
+      currentContainer.appendChild(div);
 
     // ── CHAMP ─────────────────────────────────────────────────────
     } else if (item.kind === 'field') {
-      const span = Math.min(item.span || 3, 6); // sécurité : jamais plus de 6
+      const span = Math.min(item.span || 3, 6);
 
-      // Si ce champ ne rentre pas dans la ligne en cours → on flush et on repart
       if (usedCols + span > 6) flushGrid();
 
       const cell = buildFieldCell(item, idx);
@@ -331,10 +397,65 @@ function renderForm() {
     }
   });
 
-  // Flush final : valide la dernière ligne si elle n'est pas pleine
-  // (ex : une seule ligne avec 2 champs span-3 qui fait exactement 6,
-  //  ou une ligne incomplète comme un seul champ span-3)
   flushGrid();
+}
+
+// Toggle collapse/expand d'une section en view mode
+function toggleSection(idx, blockEl, arrowEl) {
+  if (editMode) return;
+  layout[idx].collapsed = !layout[idx].collapsed;
+  saveLayout();
+  blockEl.classList.toggle('collapsed', layout[idx].collapsed);
+  arrowEl.classList.toggle('expanded',  !layout[idx].collapsed);
+}
+
+// Popover de sélection de couleur pour une section
+function showColorPicker(idx, anchorBtn) {
+  document.querySelectorAll('.color-picker-popover').forEach(p => p.remove());
+
+  const item = layout[idx];
+  const popover = document.createElement('div');
+  popover.className = 'color-picker-popover';
+
+  // Swatch "aucune couleur"
+  const noneSwatch = document.createElement('div');
+  noneSwatch.className = 'color-swatch color-swatch-none' + (!item.bgColor ? ' selected' : '');
+  noneSwatch.title = 'Aucune couleur';
+  noneSwatch.addEventListener('click', e => {
+    e.stopPropagation();
+    layout[idx].bgColor = null;
+    saveLayout(); renderForm();
+  });
+  popover.appendChild(noneSwatch);
+
+  // Swatches Notion
+  NOTION_COLORS.forEach(({ key, bg }) => {
+    const sw = document.createElement('div');
+    sw.className = 'color-swatch' + (item.bgColor === key ? ' selected' : '');
+    sw.style.background = bg;
+    sw.title = key;
+    sw.addEventListener('click', e => {
+      e.stopPropagation();
+      layout[idx].bgColor = key;
+      saveLayout(); renderForm();
+    });
+    popover.appendChild(sw);
+  });
+
+  // Position fixed calée sur le bouton
+  const rect = anchorBtn.getBoundingClientRect();
+  popover.style.top  = (rect.bottom + 4) + 'px';
+  popover.style.left = Math.max(4, rect.right - 176) + 'px';
+  document.body.appendChild(popover);
+
+  // Fermeture sur clic extérieur
+  const close = e => {
+    if (!popover.contains(e.target)) {
+      popover.remove();
+      document.removeEventListener('click', close, true);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', close, true), 0);
 }
 
 function inlineInput(weight, size, color, value) {
@@ -428,10 +549,15 @@ function buildBool(col, val) {
 }
 
 function buildText(col, val) {
-  const inp = document.createElement('input');
-  inp.type='text'; inp.className='form-field-input'; inp.value=val||''; inp.placeholder='Non renseigné';
-  inp.addEventListener('input', () => markDirty(col.id, inp.value));
-  return inp;
+  const ta = document.createElement('textarea');
+  ta.className='form-field-textarea'; ta.value=val||''; ta.rows=1; ta.placeholder='Non renseigné';
+  ta.style.minHeight = '22px';
+  ta.addEventListener('input', () => {
+    ta.style.height='auto'; ta.style.height=ta.scrollHeight+'px';
+    markDirty(col.id, ta.value);
+  });
+  setTimeout(() => { ta.style.height='auto'; ta.style.height=ta.scrollHeight+'px'; }, 0);
+  return ta;
 }
 
 function buildNumber(col, val) {
@@ -686,7 +812,27 @@ function addOverlay(div, idx) {
   </svg>`;
   tb.appendChild(handle);
 
-  if (item.kind === 'field') {
+  if (item.kind === 'title') {
+    // Taille de police
+    [{l:'S',s:'s'},{l:'M',s:'m'},{l:'L',s:'l'},{l:'XL',s:'xl'}].forEach(opt => {
+      const btn = tbBtn(opt.l, (item.fontSize||'m') === opt.s);
+      btn.addEventListener('click', e => { e.stopPropagation(); layout[idx].fontSize=opt.s; saveLayout(); renderForm(); });
+      tb.appendChild(btn);
+    });
+    // Couleur de fond
+    const colorBtn = tbBtn('🎨 Couleur', false);
+    colorBtn.addEventListener('click', e => { e.stopPropagation(); showColorPicker(idx, colorBtn); });
+    tb.appendChild(colorBtn);
+
+  } else if (item.kind === 'desc') {
+    // Taille de police
+    [{l:'S',s:'s'},{l:'M',s:'m'},{l:'L',s:'l'}].forEach(opt => {
+      const btn = tbBtn(opt.l, (item.fontSize||'m') === opt.s);
+      btn.addEventListener('click', e => { e.stopPropagation(); layout[idx].fontSize=opt.s; saveLayout(); renderForm(); });
+      tb.appendChild(btn);
+    });
+
+  } else if (item.kind === 'field') {
     const col = allColumns.find(c => c.id === item.colId);
 
     // Boutons largeur
@@ -698,7 +844,6 @@ function addOverlay(div, idx) {
 
     // Bouton champ de recherche (Ref / RefList uniquement)
     if (col && (col.kind==='ref'||col.kind==='refList') && col.refTable && refData[col.refTable]) {
-      const refCols = refData[col.refTable].columns;
       const pickBtn = tbBtn('🔍 Champ de recherche', false);
       pickBtn.addEventListener('click', e => {
         e.stopPropagation();
@@ -716,6 +861,7 @@ function addOverlay(div, idx) {
     });
     tb.appendChild(renBtn);
   }
+  // desc et separator : uniquement drag handle + supprimer
 
   // Supprimer
   const delBtn = tbBtn('✕ Supprimer', false, true);
@@ -827,9 +973,17 @@ function setupDragEvents(div, idx) {
 // ══════════════════════════════════════════════
 // AJOUTER DES ÉLÉMENTS
 // ══════════════════════════════════════════════
+function resetLayout() {
+  if (!confirm('Retirer tous les champs et éléments du formulaire ?')) return;
+  layout = [];
+  saveLayout(); renderForm();
+}
+
 function addItem(kind) {
   const defaults = { title:'Nouvelle section', desc:'Description…', separator:'' };
-  layout.push({ id:newId(), kind, label:defaults[kind]??'', span:kind==='field'?3:undefined });
+  const item = { id:newId(), kind, label:defaults[kind]??'', span:kind==='field'?3:undefined };
+  if (kind === 'title') { item.collapsed = false; item.bgColor = null; }
+  layout.push(item);
   saveLayout(); renderForm();
 }
 
@@ -865,3 +1019,64 @@ function renderPickerList(query) {
   if (!list.children.length)
     list.innerHTML=`<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:12px;">Aucun champ trouvé</div>`;
 }
+
+// ══════════════════════════════════════════════
+// RICH TEXT TOOLBAR
+// ══════════════════════════════════════════════
+function initRichToolbar() {
+  const tb = el('rich-toolbar');
+  if (!tb) return;
+
+  // Exécuter une commande de formatage au clic (mousedown pour conserver la sélection)
+  tb.querySelectorAll('[data-cmd]').forEach(btn => {
+    btn.addEventListener('mousedown', e => {
+      e.preventDefault(); // empêche la perte de la sélection
+      document.execCommand(btn.dataset.cmd, false, null);
+      // Sauvegarder le contenu mis à jour
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount) {
+        const node = sel.getRangeAt(0).commonAncestorContainer;
+        const ce = (node.nodeType === 3 ? node.parentElement : node).closest('[contenteditable="true"]');
+        if (ce && ce.dataset.layoutIdx !== undefined) {
+          layout[parseInt(ce.dataset.layoutIdx)].label = ce.innerHTML;
+          saveLayout();
+        }
+      }
+      updateRichToolbarState();
+    });
+  });
+
+  // Afficher/repositionner la toolbar à chaque changement de sélection
+  document.addEventListener('selectionchange', () => {
+    if (!editMode) { tb.style.display = 'none'; return; }
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) { tb.style.display = 'none'; return; }
+    const node = sel.getRangeAt(0).commonAncestorContainer;
+    const ce = (node.nodeType === 3 ? node.parentElement : node).closest('[contenteditable="true"]');
+    if (!ce) { tb.style.display = 'none'; return; }
+
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    tb.style.display = 'flex';
+    tb.style.left = Math.max(4, rect.left + rect.width / 2 - 42) + 'px';
+    tb.style.top  = Math.max(4, rect.top - 34) + 'px';
+    updateRichToolbarState();
+  });
+
+  // Masquer si clic en dehors d'un contenteditable ou de la toolbar
+  document.addEventListener('mousedown', e => {
+    if (!tb.contains(e.target) && !e.target.closest('[contenteditable="true"]')) {
+      tb.style.display = 'none';
+    }
+  });
+}
+
+function updateRichToolbarState() {
+  const tb = el('rich-toolbar');
+  if (!tb) return;
+  tb.querySelectorAll('[data-cmd]').forEach(btn => {
+    btn.classList.toggle('rt-active', document.queryCommandState(btn.dataset.cmd));
+  });
+}
+
+// Initialisation au chargement
+document.addEventListener('DOMContentLoaded', initRichToolbar);
