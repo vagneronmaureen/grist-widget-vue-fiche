@@ -939,6 +939,12 @@ function setupDragEvents(div, idx) {
 // ══════════════════════════════════════════════
 // AJOUTER DES ÉLÉMENTS
 // ══════════════════════════════════════════════
+function resetLayout() {
+  if (!confirm('Retirer tous les champs et éléments du formulaire ?')) return;
+  layout = [];
+  saveLayout(); renderForm();
+}
+
 function addItem(kind) {
   const defaults = { title:'Nouvelle section', desc:'Description…', separator:'' };
   const item = { id:newId(), kind, label:defaults[kind]??'', span:kind==='field'?3:undefined };
