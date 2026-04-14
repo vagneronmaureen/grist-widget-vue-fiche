@@ -15,6 +15,10 @@ let refData = {};
 // Layout item : { id, kind, colId?, label?, span?, refLabelField?, collapsed?, bgColor? }
 let layout = [];
 
+// Tailles de police pour titres et descriptions
+const TITLE_SIZES = { s:'11px', m:'13px', l:'16px', xl:'20px' };
+const DESC_SIZES  = { s:'10px', m:'12px', l:'14px' };
+
 // Palette Notion (clés utilisées comme data-color et pour le color picker)
 const NOTION_COLORS = [
   { key:'gray',   bg:'#F1F1EF' },
@@ -319,16 +323,24 @@ function renderForm() {
       arrow.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4l4 4 4-4"/></svg>`;
       header.appendChild(arrow);
 
+      const titleSize = TITLE_SIZES[item.fontSize] || TITLE_SIZES.m;
+      header.style.fontSize = titleSize;
+
       if (editMode) {
-        const inp = inlineInput('700', '13px', 'var(--text)', item.label || 'Section');
-        inp.addEventListener('change', e => { layout[idx].label = e.target.value; saveLayout(); });
-        header.appendChild(inp);
+        const ce = document.createElement('div');
+        ce.contentEditable = 'true';
+        ce.innerHTML = item.label || 'Section';
+        ce.dataset.layoutIdx = idx;
+        ce.style.cssText = 'outline:none;flex:1;min-width:0;';
+        ce.addEventListener('keydown', e => { if (e.key === 'Enter') e.preventDefault(); });
+        ce.addEventListener('input', () => { layout[idx].label = ce.innerHTML; saveLayout(); });
+        header.appendChild(ce);
         header.classList.add('draggable-el');
         setupDragEvents(header, idx);
         addOverlay(header, idx);
       } else {
         const lbl = document.createElement('span');
-        lbl.textContent = item.label || 'Section';
+        lbl.innerHTML = item.label || 'Section';
         header.appendChild(lbl);
         header.addEventListener('click', () => toggleSection(idx, block, arrow));
       }
@@ -348,12 +360,18 @@ function renderForm() {
     } else if (item.kind === 'desc') {
       flushGrid();
       const div = makeEl('div', 'form-section-desc', idx);
+      const descSize = DESC_SIZES[item.fontSize] || DESC_SIZES.m;
+      div.style.fontSize = descSize;
       if (editMode) {
-        const ta = inlineTextarea('400', '12px', 'var(--text-label)', item.label || '');
-        ta.addEventListener('change', e => { layout[idx].label = e.target.value; saveLayout(); });
-        div.appendChild(ta);
+        const ce = document.createElement('div');
+        ce.contentEditable = 'true';
+        ce.innerHTML = item.label || '';
+        ce.dataset.layoutIdx = idx;
+        ce.style.cssText = 'outline:none;width:100%;min-height:1.4em;';
+        ce.addEventListener('input', () => { layout[idx].label = ce.innerHTML; saveLayout(); });
+        div.appendChild(ce);
       } else {
-        div.textContent = item.label || '';
+        div.innerHTML = item.label || '';
       }
       if (editMode) addOverlay(div, idx);
       currentContainer.appendChild(div);
@@ -790,13 +808,24 @@ function addOverlay(div, idx) {
   tb.appendChild(handle);
 
   if (item.kind === 'title') {
-    // Bouton color picker pour les titres de section
-    const colorBtn = tbBtn('🎨 Couleur', false);
-    colorBtn.addEventListener('click', e => {
-      e.stopPropagation();
-      showColorPicker(idx, colorBtn);
+    // Taille de police
+    [{l:'S',s:'s'},{l:'M',s:'m'},{l:'L',s:'l'},{l:'XL',s:'xl'}].forEach(opt => {
+      const btn = tbBtn(opt.l, (item.fontSize||'m') === opt.s);
+      btn.addEventListener('click', e => { e.stopPropagation(); layout[idx].fontSize=opt.s; saveLayout(); renderForm(); });
+      tb.appendChild(btn);
     });
+    // Couleur de fond
+    const colorBtn = tbBtn('🎨 Couleur', false);
+    colorBtn.addEventListener('click', e => { e.stopPropagation(); showColorPicker(idx, colorBtn); });
     tb.appendChild(colorBtn);
+
+  } else if (item.kind === 'desc') {
+    // Taille de police
+    [{l:'S',s:'s'},{l:'M',s:'m'},{l:'L',s:'l'}].forEach(opt => {
+      const btn = tbBtn(opt.l, (item.fontSize||'m') === opt.s);
+      btn.addEventListener('click', e => { e.stopPropagation(); layout[idx].fontSize=opt.s; saveLayout(); renderForm(); });
+      tb.appendChild(btn);
+    });
 
   } else if (item.kind === 'field') {
     const col = allColumns.find(c => c.id === item.colId);
@@ -985,3 +1014,64 @@ function renderPickerList(query) {
   if (!list.children.length)
     list.innerHTML=`<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:12px;">Aucun champ trouvé</div>`;
 }
+
+// ══════════════════════════════════════════════
+// RICH TEXT TOOLBAR
+// ══════════════════════════════════════════════
+function initRichToolbar() {
+  const tb = el('rich-toolbar');
+  if (!tb) return;
+
+  // Exécuter une commande de formatage au clic (mousedown pour conserver la sélection)
+  tb.querySelectorAll('[data-cmd]').forEach(btn => {
+    btn.addEventListener('mousedown', e => {
+      e.preventDefault(); // empêche la perte de la sélection
+      document.execCommand(btn.dataset.cmd, false, null);
+      // Sauvegarder le contenu mis à jour
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount) {
+        const node = sel.getRangeAt(0).commonAncestorContainer;
+        const ce = (node.nodeType === 3 ? node.parentElement : node).closest('[contenteditable="true"]');
+        if (ce && ce.dataset.layoutIdx !== undefined) {
+          layout[parseInt(ce.dataset.layoutIdx)].label = ce.innerHTML;
+          saveLayout();
+        }
+      }
+      updateRichToolbarState();
+    });
+  });
+
+  // Afficher/repositionner la toolbar à chaque changement de sélection
+  document.addEventListener('selectionchange', () => {
+    if (!editMode) { tb.style.display = 'none'; return; }
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) { tb.style.display = 'none'; return; }
+    const node = sel.getRangeAt(0).commonAncestorContainer;
+    const ce = (node.nodeType === 3 ? node.parentElement : node).closest('[contenteditable="true"]');
+    if (!ce) { tb.style.display = 'none'; return; }
+
+    const rect = sel.getRangeAt(0).getBoundingClientRect();
+    tb.style.display = 'flex';
+    tb.style.left = Math.max(4, rect.left + rect.width / 2 - 42) + 'px';
+    tb.style.top  = Math.max(4, rect.top - 34) + 'px';
+    updateRichToolbarState();
+  });
+
+  // Masquer si clic en dehors d'un contenteditable ou de la toolbar
+  document.addEventListener('mousedown', e => {
+    if (!tb.contains(e.target) && !e.target.closest('[contenteditable="true"]')) {
+      tb.style.display = 'none';
+    }
+  });
+}
+
+function updateRichToolbarState() {
+  const tb = el('rich-toolbar');
+  if (!tb) return;
+  tb.querySelectorAll('[data-cmd]').forEach(btn => {
+    btn.classList.toggle('rt-active', document.queryCommandState(btn.dataset.cmd));
+  });
+}
+
+// Initialisation au chargement
+document.addEventListener('DOMContentLoaded', initRichToolbar);

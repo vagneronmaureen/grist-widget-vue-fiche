@@ -159,9 +159,9 @@
   .form-field-textarea:focus  { border-bottom-color: var(--accent); }
   .form-field-input::placeholder,
   .form-field-textarea::placeholder { color: var(--text-muted); font-style: italic; }
-  /* Champ vide : fond rouge transparent */
+  /* Champ vide : bordure gauche rouge (lisible sur tous les fonds) */
   .form-field.field-empty {
-    background: rgba(208, 2, 27, 0.05);
+    border-left: 2px solid var(--danger);
   }
   .form-field-textarea { line-height: 1.5; min-height: 52px; }
   .form-field-check-wrap { display: flex; align-items: center; gap: 7px; padding: 3px 0; }
@@ -250,8 +250,30 @@
     line-height: 1.55; position: relative;
   }
 
-  /* Séparateur */
-  .form-separator { height: 1px; background: var(--border); margin: 6px 0; position: relative; }
+  /* Séparateur — padding invisible pour agrandir la zone de survol */
+  .form-separator {
+    position: relative;
+    padding: 9px 20px;
+    margin: 0;
+    display: flex;
+    align-items: center;
+  }
+  .form-separator::before {
+    content: '';
+    display: block;
+    height: 1.5px;
+    width: 100%;
+    background: var(--border);
+    border-radius: 2px;
+  }
+  /* En mode édition : tirets pour signaler l'élément draggable */
+  .edit-mode .form-separator::before {
+    background: repeating-linear-gradient(
+      to right,
+      var(--border) 0px, var(--border) 8px,
+      transparent 8px, transparent 14px
+    );
+  }
 
   /* ══ COLOR PICKER POPOVER ══ */
   .color-picker-popover {
@@ -442,6 +464,32 @@
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+  /* ══ RICH TEXT TOOLBAR (flottante sur sélection) ══ */
+  #rich-toolbar {
+    display: none;
+    position: fixed;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--r);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.13);
+    z-index: 300;
+    flex-direction: row;
+    overflow: hidden;
+    pointer-events: all;
+  }
+  #rich-toolbar button {
+    width: 28px; height: 26px;
+    border: none; border-right: 1px solid var(--border);
+    background: var(--surface); color: var(--text);
+    cursor: pointer; font-family: var(--font); font-size: 13px;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.1s;
+    padding: 0;
+  }
+  #rich-toolbar button:last-child { border-right: none; }
+  #rich-toolbar button:hover { background: var(--bg); }
+  #rich-toolbar button.rt-active { background: var(--accent-light); color: var(--accent); }
+
   ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
@@ -532,6 +580,13 @@
     </div>
     <div class="picker-list" id="picker-list"></div>
   </div>
+</div>
+
+<!-- Barre de mise en forme rich text (apparaît sur sélection en mode config) -->
+<div id="rich-toolbar">
+  <button data-cmd="bold" title="Gras"><b>B</b></button>
+  <button data-cmd="italic" title="Italique"><i>I</i></button>
+  <button data-cmd="underline" title="Souligné"><u>U</u></button>
 </div>
 
 <div id="toast"></div>
