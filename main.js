@@ -978,8 +978,7 @@ function addOverlay(div, idx) {
     const emptyBtn = tbBtn('💬 Texte vide', false);
     emptyBtn.addEventListener('click', e => {
       e.stopPropagation();
-      const v = prompt('Texte affiché quand le champ est vide :', item.emptyText || 'Non renseigné');
-      if (v !== null) { layout[idx].emptyText = v.trim() || ''; saveLayout(); renderForm(); }
+      showEmptyTextPicker(idx, emptyBtn, item.emptyText || '');
     });
     tb.appendChild(emptyBtn);
 
@@ -1084,6 +1083,63 @@ function showEmojiPicker(layoutIdx, anchorBtn, currentEmoji) {
 
   document.addEventListener('click', () => pop.remove(), { once: true });
   document.body.appendChild(pop);
+}
+
+// ── Picker texte vide (remplace prompt natif) ──
+function showEmptyTextPicker(layoutIdx, anchorBtn, currentText) {
+  const OLD_ID = 'empty-text-picker';
+  const old = document.getElementById(OLD_ID);
+  if (old) { old.remove(); return; }
+
+  const pop = document.createElement('div');
+  pop.id = OLD_ID;
+  const rect = anchorBtn.getBoundingClientRect();
+  pop.style.cssText = `
+    position:fixed;top:${rect.bottom + 6}px;left:${rect.left}px;z-index:500;
+    background:var(--surface);border:1px solid var(--border);border-radius:8px;
+    box-shadow:0 4px 16px rgba(0,0,0,0.14);padding:10px;width:240px;box-sizing:border-box;
+  `;
+  pop.addEventListener('click', e => e.stopPropagation());
+
+  const label = document.createElement('div');
+  label.textContent = 'Texte si champ vide :';
+  label.style.cssText = 'font-size:11px;color:var(--text-label);margin-bottom:6px;';
+  pop.appendChild(label);
+
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:6px;align-items:center;';
+
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.placeholder = 'Non renseigné';
+  inp.value = currentText;
+  inp.style.cssText = 'flex:1;min-width:0;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:var(--font);box-sizing:border-box;';
+
+  const okBtn = document.createElement('button');
+  okBtn.textContent = '✓';
+  okBtn.title = 'Valider';
+  okBtn.style.cssText = 'flex-shrink:0;padding:5px 10px;border:none;border-radius:4px;background:var(--accent);color:#fff;font-size:13px;cursor:pointer;';
+
+  const save = () => {
+    layout[layoutIdx].emptyText = inp.value.trim();
+    saveLayout(); renderForm(); pop.remove();
+  };
+
+  okBtn.addEventListener('click', e => { e.stopPropagation(); save(); });
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.stopPropagation(); save(); }
+    if (e.key === 'Escape') { e.stopPropagation(); pop.remove(); }
+  });
+
+  row.appendChild(inp);
+  row.appendChild(okBtn);
+  pop.appendChild(row);
+
+  document.addEventListener('click', () => pop.remove(), { once: true });
+  document.body.appendChild(pop);
+
+  // Focus automatique
+  setTimeout(() => { inp.focus(); inp.select(); }, 0);
 }
 
 // ── Picker couleur pour les tags ref/refList ──
