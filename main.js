@@ -12,6 +12,11 @@ let tableId           = null;
 // Données des tables référencées : { tableId: { columns: [], rows: [{id, ...fields}] } }
 let refData = {};
 
+// Valeurs brutes de la table courante : { recordId: { colId: rawValue } }
+// fetchTable() retourne les vrais IDs pour Ref/RefList, contrairement à onRecord
+// qui peut envoyer les valeurs d'affichage (ex: "Jean Dupont") ou null.
+let rawRecords = {};
+
 // Layout item : { id, kind, colId?, label?, span?, refLabelField?, collapsed?, bgColor? }
 let layout = [];
 
@@ -120,6 +125,7 @@ async function loadColumnMeta() {
     });
 
     renderForm();
+    loadRawRecords(); // charge les vrais IDs pour Ref/RefList en arrière-plan
   } catch(e) { console.warn('Métadonnées colonnes :', e); }
 }
 
@@ -131,6 +137,38 @@ async function loadRefTable(refTableId) {
     refData[refTableId] = { columns: keys, rows: rows };
     renderForm();
   } catch(e) { console.warn('Table référencée :', refTableId, e); }
+}
+
+// Charge les valeurs brutes de la table courante via fetchTable.
+// Contrairement à onRecord (qui envoie les valeurs d'affichage pour Ref/RefList),
+// fetchTable retourne les vrais IDs stockés : ex. ['L', 5, 7] pour un RefList.
+async function loadRawRecords() {
+  if (!tableId) return;
+  try {
+    const rows = await grist.docApi.fetchTable(tableId);
+    rawRecords = {};
+    rows.id.forEach((id, i) => {
+      rawRecords[id] = {};
+      Object.keys(rows).forEach(key => {
+        if (key !== 'id') rawRecords[id][key] = rows[key][i];
+      });
+    });
+    // Si un record est déjà affiché, mettre à jour ses champs ref/refList et re-rendre
+    if (currentRecord && rawRecords[currentRecord.id]) {
+      const raw = rawRecords[currentRecord.id];
+      let changed = false;
+      allColumns.forEach(col => {
+        if (col.kind !== 'ref' && col.kind !== 'refList') return;
+        if (pendingSavedValues && col.id in pendingSavedValues) return;
+        const rawVal = raw[col.id];
+        if (rawVal !== null && rawVal !== undefined) {
+          currentRecord[col.id] = rawVal;
+          changed = true;
+        }
+      });
+      if (changed) renderForm();
+    }
+  } catch(e) { console.warn('loadRawRecords :', e); }
 }
 
 // Récupère la valeur label d'une ligne d'une table référencée
@@ -182,13 +220,30 @@ grist.onRecords(async (records) => {
 
 grist.onRecord((record) => {
   if (hasPendingChanges() && !confirm('Des modifications non enregistrées seront perdues. Continuer ?')) return;
+  const prev = currentRecord;
   // Si la ligne change, les valeurs sauvegardées ne s'appliquent plus
-  if (pendingSavedValues && currentRecord && record.id !== currentRecord.id) {
+  if (pendingSavedValues && prev && record.id !== prev.id) {
     pendingSavedValues = null;
   }
   // Fusionner les valeurs sauvegardées pour protéger contre un onRecord périmé de Grist
   if (pendingSavedValues) {
     record = { ...record, ...pendingSavedValues };
+  }
+  // Grist envoie les valeurs d'affichage (ex: "Jean Dupont") dans onRecord pour
+  // les champs Ref/RefList, pas les vrais IDs. On patch avec rawRecords si disponible
+  // (rawRecords vient de fetchTable qui retourne les vraies valeurs brutes).
+  if (rawRecords[record.id]) {
+    const raw = rawRecords[record.id];
+    const patched = { ...record };
+    allColumns.forEach(col => {
+      if (col.kind !== 'ref' && col.kind !== 'refList') return;
+      if (pendingSavedValues && col.id in pendingSavedValues) return;
+      const rawVal = raw[col.id];
+      if (rawVal !== null && rawVal !== undefined) {
+        patched[col.id] = rawVal;
+      }
+    });
+    record = patched;
   }
   hide('loading'); hide('empty-state');
   el('product-form').style.display = 'block';
@@ -488,10 +543,15 @@ function buildFieldCell(item, idx) {
                  : (rawVal !== null && rawVal !== undefined ? rawVal : '');
   const kind   = col.kind || guessKind(rawVal);
 
+  // Pour refList, Grist stocke un champ vide comme ['L'] (marqueur seul, sans IDs).
+  // On filtre les IDs numériques > 0 pour détecter correctement l'état vide.
+  const refIds = (kind === 'refList' || kind === 'ref')
+    ? (Array.isArray(val) ? val.filter(v => typeof v === 'number' && v > 0) : (val && typeof val === 'number' && val > 0 ? [val] : []))
+    : null;
+
   const isEmpty = kind !== 'bool' && (
     val === null || val === undefined || val === '' ||
-    (Array.isArray(val) && val.length === 0) ||
-    ((kind === 'ref' || kind === 'refList') && (val === 0 || val === null))
+    (refIds !== null ? refIds.length === 0 : (Array.isArray(val) && val.length === 0))
   );
 
   const cell = document.createElement('div');
@@ -622,6 +682,8 @@ function buildChoiceList(col, currentVal, onChange) {
     selected.forEach((s, i) => {
       const tag = makePill(s, '#e8f0fe', '#1a73e8', () => {
         selected.splice(i, 1); renderAll(); onChange(selected.length ? ['L', ...selected] : null);
+        const cell = wrap.closest('.form-field');
+        if (cell && !editMode) cell.classList.toggle('field-empty', selected.length === 0);
       });
       // On insère avant le dropdown qui est déjà dans le wrap
       wrap.insertBefore(tag, dropdown);
@@ -688,9 +750,15 @@ function buildRefSearch(col, currentVal, isMulti, labelField, onChange) {
     if (!Array.isArray(val)) return (val && typeof val === 'number' && val > 0) ? [val] : [];
     return val.filter(id => typeof id === 'number' && id > 0);
   };
-  let selected = isMulti
-    ? toRefIds(currentVal)
-    : (currentVal ? [currentVal] : []);
+  // Pour refList : si Grist envoie une chaîne d'affichage (ex: "Jean Dupont") au lieu des IDs,
+  // on l'accepte telle quelle comme ref le fait, plutôt que de filtrer et tout perdre.
+  const toInitialSelected = (val) => {
+    if (!isMulti) return val ? [val] : [];
+    if (!Array.isArray(val)) return val ? [val] : [];
+    const ids = toRefIds(val);
+    return ids.length > 0 ? ids : [];
+  };
+  let selected = toInitialSelected(currentVal);
 
   const wrap = document.createElement('div');
   wrap.style.cssText = 'display:flex;flex-direction:column;gap:4px;position:relative;';
@@ -699,6 +767,11 @@ function buildRefSearch(col, currentVal, isMulti, labelField, onChange) {
   const tagsRow = document.createElement('div');
   tagsRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px;min-height:20px;';
 
+  const updateCellEmpty = () => {
+    const cell = wrap.closest('.form-field');
+    if (cell && !editMode) cell.classList.toggle('field-empty', selected.length === 0);
+  };
+
   const renderTags = () => {
     tagsRow.innerHTML = '';
     selected.forEach((id, i) => {
@@ -706,6 +779,7 @@ function buildRefSearch(col, currentVal, isMulti, labelField, onChange) {
       const tag = makePill(lbl, '#e8f0fe', '#1a73e8', () => {
         selected.splice(i,1); renderTags();
         onChange(isMulti ? ['L', ...selected] : (selected[0]??null));
+        updateCellEmpty();
       });
       tagsRow.appendChild(tag);
     });
@@ -842,9 +916,9 @@ function addOverlay(div, idx) {
       tb.appendChild(btn);
     });
 
-    // Bouton champ de recherche (Ref / RefList uniquement)
-    if (col && (col.kind==='ref'||col.kind==='refList') && col.refTable && refData[col.refTable]) {
-      const pickBtn = tbBtn('🔍 Champ de recherche', false);
+    // Bouton champ d'affichage (Ref / RefList uniquement)
+    if (col && (col.kind === 'ref' || col.kind === 'refList') && col.refTable && refData[col.refTable]) {
+      const pickBtn = tbBtn('🔍 Champ affiché', false);
       pickBtn.addEventListener('click', e => {
         e.stopPropagation();
         showRefFieldPicker(idx, col.refTable, item.refLabelField);
@@ -879,12 +953,12 @@ function tbBtn(label, active, danger=false) {
   return btn;
 }
 
-// ── Mini-modal pour choisir le champ de recherche d'une référence ──
+
+// ── Mini-modal pour choisir le champ d'affichage d'une référence ──
 function showRefFieldPicker(layoutIdx, refTableId, currentField) {
   const data = refData[refTableId];
   if (!data) return;
 
-  // Supprimer l'ancien picker s'il existe
   const old = document.getElementById('ref-field-picker');
   if (old) old.remove();
 
@@ -902,31 +976,31 @@ function showRefFieldPicker(layoutIdx, refTableId, currentField) {
   `;
 
   const header = document.createElement('div');
-  header.style.cssText='height:42px;padding:0 14px;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;';
+  header.style.cssText = 'height:42px;padding:0 14px;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;';
   header.innerHTML = `<span>Champ d'affichage / recherche</span>`;
   const close = document.createElement('button');
-  close.textContent='×'; close.style.cssText='border:none;background:none;cursor:pointer;font-size:18px;color:var(--text-muted);';
+  close.textContent = '×'; close.style.cssText = 'border:none;background:none;cursor:pointer;font-size:18px;color:var(--text-muted);';
   close.addEventListener('click', () => modal.remove());
   header.appendChild(close);
   box.appendChild(header);
 
   const sub = document.createElement('div');
-  sub.style.cssText='padding:8px 14px 4px;font-size:11px;color:var(--text-muted);';
+  sub.style.cssText = 'padding:8px 14px 4px;font-size:11px;color:var(--text-muted);';
   sub.textContent = `Table : ${refTableId} — choisissez la colonne utilisée pour afficher et rechercher les entrées`;
   box.appendChild(sub);
 
   const list = document.createElement('div');
-  list.style.cssText='padding:6px;max-height:280px;overflow-y:auto;';
+  list.style.cssText = 'padding:6px;max-height:280px;overflow-y:auto;';
 
   data.columns.forEach(colId => {
     const btn = document.createElement('button');
-    btn.style.cssText='display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;border:none;background:none;font-family:var(--font);font-size:13px;color:var(--text);cursor:pointer;border-radius:var(--r);text-align:left;transition:background .1s;';
+    btn.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;border:none;background:none;font-family:var(--font);font-size:13px;color:var(--text);cursor:pointer;border-radius:var(--r);text-align:left;transition:background .1s;';
     btn.innerHTML = `
       <span style="flex:1">${escHtml(colId.replace(/_/g,' '))}</span>
-      ${colId===currentField ? `<span style="color:var(--accent);font-size:11px;font-weight:700;">✓ Actif</span>` : ''}
+      ${colId === currentField ? `<span style="color:var(--accent);font-size:11px;font-weight:700;">✓ Actif</span>` : ''}
     `;
-    btn.addEventListener('mouseenter', () => btn.style.background='var(--bg)');
-    btn.addEventListener('mouseleave', () => btn.style.background='');
+    btn.addEventListener('mouseenter', () => btn.style.background = 'var(--bg)');
+    btn.addEventListener('mouseleave', () => btn.style.background = '');
     btn.addEventListener('click', () => {
       layout[layoutIdx].refLabelField = colId;
       saveLayout(); renderForm(); modal.remove();
@@ -936,7 +1010,7 @@ function showRefFieldPicker(layoutIdx, refTableId, currentField) {
 
   box.appendChild(list);
   modal.appendChild(box);
-  modal.addEventListener('click', e => { if(e.target===modal) modal.remove(); });
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
   document.body.appendChild(modal);
 }
 
