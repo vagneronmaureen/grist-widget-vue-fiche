@@ -5,20 +5,40 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Fiche Produit SDPC</title>
 <style>
+  /* Police Marianne — Système de Design de l'État */
+  @font-face {
+    font-family: 'Marianne';
+    src: url('https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.11.2/dist/fonts/Marianne-Regular.woff2') format('woff2');
+    font-weight: 400; font-display: swap;
+  }
+  @font-face {
+    font-family: 'Marianne';
+    src: url('https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.11.2/dist/fonts/Marianne-Medium.woff2') format('woff2');
+    font-weight: 500; font-display: swap;
+  }
+  @font-face {
+    font-family: 'Marianne';
+    src: url('https://cdn.jsdelivr.net/npm/@gouvfr/dsfr@1.11.2/dist/fonts/Marianne-Bold.woff2') format('woff2');
+    font-weight: 700; font-display: swap;
+  }
+
   :root {
-    --bg:           #f7f7f7;
+    /* Palette DSFR */
+    --bg:           #f6f6f6;
     --surface:      #ffffff;
-    --border:       #e8e8e8;
-    --accent:       #16B378;
-    --accent-light: #e8f7f1;
-    --accent-mid:   #0ea066;
-    --danger:       #d0021b;
-    --text:         #262633;
-    --text-label:   #929299;
-    --text-muted:   #b8b8bf;
-    --shadow:       0 1px 4px rgba(0,0,0,0.07);
-    --r:            3px;
-    --font:         -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --border:       #dddddd;
+    --border-dark:  #929292;
+    --accent:       #000091;       /* Bleu France */
+    --accent-light: #f0f0fb;       /* Fond bleu clair */
+    --accent-mid:   #1212ff;       /* Hover */
+    --danger:       #e1000f;       /* Rouge Marianne */
+    --success:      #18753c;       /* Vert succès DSFR */
+    --text:         #161616;       /* Texte principal */
+    --text-label:   #666666;       /* Labels */
+    --text-muted:   #929292;       /* Texte secondaire */
+    --shadow:       0 2px 6px rgba(0,0,0,0.08);
+    --r:            4px;
+    --font:         'Marianne', system-ui, -apple-system, 'Segoe UI', sans-serif;
     /* Palette Notion */
     --notion-gray-bg:#F1F1EF;   --notion-gray-hd:#E9E9E7;
     --notion-brown-bg:#F4EEEE;  --notion-brown-hd:#EEE4E1;
@@ -40,7 +60,8 @@
   /* ══ TOP BAR ══ */
   #topbar {
     height: 48px; background: var(--surface);
-    border-bottom: 1px solid var(--border);
+    border-bottom: 2px solid var(--border);
+    border-top: 3px solid var(--accent);   /* liseré bleu France en haut */
     display: flex; align-items: center; gap: 8px;
     padding: 0 16px; flex-shrink: 0;
     position: sticky; top: 0; z-index: 200;
@@ -69,21 +90,22 @@
   .tb-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
   #btn-save {
-    height: 28px; padding: 0 14px; border: none; border-radius: var(--r);
+    height: 30px; padding: 0 16px; border: none; border-radius: var(--r);
     background: var(--accent); color: #fff;
-    font-family: var(--font); font-size: 12px; font-weight: 600;
+    font-family: var(--font); font-size: 12px; font-weight: 700;
     cursor: pointer; display: none; align-items: center; gap: 5px;
+    letter-spacing: 0.02em;
   }
-  #btn-save:hover { opacity: .88; }
+  #btn-save:hover { background: var(--accent-mid); }
   #btn-save.visible { display: flex; }
   #btn-discard {
-    height: 28px; padding: 0 12px;
-    border: 1px solid var(--border); border-radius: var(--r);
-    background: var(--surface); color: var(--text);
-    font-family: var(--font); font-size: 12px;
+    height: 30px; padding: 0 14px;
+    border: 1px solid var(--accent); border-radius: var(--r);
+    background: var(--surface); color: var(--accent);
+    font-family: var(--font); font-size: 12px; font-weight: 500;
     cursor: pointer; display: none; align-items: center; transition: background 0.1s;
   }
-  #btn-discard:hover { background: var(--bg); }
+  #btn-discard:hover { background: var(--accent-light); }
   #btn-discard.visible { display: flex; }
 
   /* ══ CARD AREA ══ */
@@ -142,8 +164,8 @@
   .span-6 { grid-column: span 6; border-right: none; }
 
   .form-field-label {
-    font-size: 11px; font-weight: 600; color: var(--text-label);
-    text-transform: uppercase; letter-spacing: 0.05em; user-select: none;
+    font-size: 11px; font-weight: 700; color: var(--text-label);
+    text-transform: uppercase; letter-spacing: 0.07em; user-select: none;
   }
   .form-field-input,
   .form-field-textarea {
@@ -159,9 +181,10 @@
   .form-field-textarea:focus  { border-bottom-color: var(--accent); }
   .form-field-input::placeholder,
   .form-field-textarea::placeholder { color: var(--text-muted); font-style: italic; }
-  /* Champ vide : bordure gauche rouge (lisible sur tous les fonds) */
+  /* Champ vide : liseré rouge à gauche (style notice DSFR) */
   .form-field.field-empty {
-    border-left: 2px solid var(--danger);
+    border-left: 3px solid var(--danger);
+    padding-left: 17px; /* compense la bordure pour garder l'alignement */
   }
   .form-field-textarea { line-height: 1.5; min-height: 52px; }
   .form-field-check-wrap { display: flex; align-items: center; gap: 7px; padding: 3px 0; }
@@ -344,7 +367,7 @@
   .el-toolbar {
     display: none;
     position: absolute;
-    top: 4px; right: 4px;
+    top: 4px; left: 0;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--r);
@@ -386,16 +409,16 @@
   }
   .drop-indicator.visible { display: block; }
 
-  /* Bannière mode édition */
+  /* Bannière mode édition — style notice DSFR */
   #edit-banner {
     display: none;
     align-items: center; gap: 10px;
     background: var(--accent-light);
-    border: 1px solid var(--accent);
-    border-radius: 4px;
-    padding: 8px 14px;
+    border-left: 4px solid var(--accent);
+    border-radius: 0 var(--r) var(--r) 0;
+    padding: 10px 14px;
     margin-bottom: 12px;
-    font-size: 12px; color: var(--accent-mid); font-weight: 500;
+    font-size: 12px; color: var(--accent); font-weight: 500;
   }
   #edit-banner.visible { display: flex; }
 
@@ -458,12 +481,14 @@
     letter-spacing: .03em; margin-left: auto; flex-shrink: 0;
   }
 
-  /* Toast */
+  /* Toast — style alerte DSFR */
   #toast {
     position: fixed; bottom: 18px; left: 50%;
-    transform: translateX(-50%) translateY(6px);
-    background: #333; color: #fff; font-size: 12px; padding: 7px 14px;
-    border-radius: 4px; opacity: 0; pointer-events: none;
+    transform: translateX(-50%) translateY(8px);
+    background: var(--text); color: #fff; font-size: 12px; font-weight: 500;
+    padding: 8px 16px; border-radius: var(--r);
+    border-left: 3px solid var(--success);
+    opacity: 0; pointer-events: none;
     transition: opacity .2s, transform .2s; z-index: 400;
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }

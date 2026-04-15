@@ -42,6 +42,18 @@ function newId() { return _idCounter++; }
 let dragSrcIdx  = null;
 let dropTargIdx = null;
 
+// Palette de couleurs pour les tags ref/refList
+const TAG_COLORS = [
+  { key: 'blue',   bg: '#e8f0fe', text: '#1a73e8', label: 'Bleu'   },
+  { key: 'green',  bg: '#e6f4ea', text: '#137333', label: 'Vert'   },
+  { key: 'purple', bg: '#f3e8fd', text: '#7c3aed', label: 'Violet' },
+  { key: 'teal',   bg: '#e6f4f1', text: '#0d7377', label: 'Cyan'   },
+  { key: 'orange', bg: '#fef3e2', text: '#b45309', label: 'Orange' },
+  { key: 'red',    bg: '#fce8e6', text: '#c5221f', label: 'Rouge'  },
+  { key: 'pink',   bg: '#fce8f3', text: '#b4276f', label: 'Rose'   },
+  { key: 'gray',   bg: '#f1f3f4', text: '#5f6368', label: 'Gris'   },
+];
+
 // ══════════════════════════════════════════════
 // PERSISTANCE
 // ══════════════════════════════════════════════
@@ -561,8 +573,14 @@ function buildFieldCell(item, idx) {
   if (editMode) setupDragEvents(cell, idx);
 
   const label = document.createElement('div');
-  label.className   = 'form-field-label';
-  label.textContent = item.label || col.label || item.colId;
+  label.className = 'form-field-label';
+  if (item.emoji) {
+    const ico = document.createElement('span');
+    ico.textContent = item.emoji;
+    ico.style.cssText = 'margin-right:5px;font-style:normal;';
+    label.appendChild(ico);
+  }
+  label.appendChild(document.createTextNode(item.label || col.label || item.colId));
   cell.appendChild(label);
 
   if (editMode) {
@@ -575,14 +593,15 @@ function buildFieldCell(item, idx) {
     return cell;
   }
 
+  const emptyText = item.emptyText || 'Non renseigné';
   if      (kind === 'bool')       cell.appendChild(buildBool(col, val));
-  else if (kind === 'choice')     cell.appendChild(buildChoiceSelect(col, val, v => markDirty(item.colId, v)));
-  else if (kind === 'choiceList') cell.appendChild(buildChoiceList(col, val,   v => markDirty(item.colId, v)));
-  else if (kind === 'ref')        cell.appendChild(buildRefSearch(col, val, false, item.refLabelField, v => markDirty(item.colId, v)));
-  else if (kind === 'refList')    cell.appendChild(buildRefSearch(col, val, true,  item.refLabelField, v => markDirty(item.colId, v)));
-  else if (kind === 'longtext' || (typeof rawVal==='string' && rawVal.length>80)) cell.appendChild(buildLongText(col, val));
-  else if (kind === 'number')     cell.appendChild(buildNumber(col, val));
-  else                            cell.appendChild(buildText(col, val));
+  else if (kind === 'choice')     cell.appendChild(buildChoiceSelect(col, val, emptyText, v => markDirty(item.colId, v)));
+  else if (kind === 'choiceList') cell.appendChild(buildChoiceList(col, val, v => markDirty(item.colId, v)));
+  else if (kind === 'ref')        cell.appendChild(buildRefSearch(col, val, false, item.refLabelField, item.tagColor, emptyText, v => markDirty(item.colId, v)));
+  else if (kind === 'refList')    cell.appendChild(buildRefSearch(col, val, true,  item.refLabelField, item.tagColor, emptyText, v => markDirty(item.colId, v)));
+  else if (kind === 'longtext' || (typeof rawVal==='string' && rawVal.length>80)) cell.appendChild(buildLongText(col, val, emptyText));
+  else if (kind === 'number')     cell.appendChild(buildNumber(col, val, emptyText));
+  else                            cell.appendChild(buildText(col, val, emptyText));
 
   return cell;
 }
@@ -608,9 +627,9 @@ function buildBool(col, val) {
   wrap.appendChild(chk); return wrap;
 }
 
-function buildText(col, val) {
+function buildText(col, val, emptyText = 'Non renseigné') {
   const ta = document.createElement('textarea');
-  ta.className='form-field-textarea'; ta.value=val||''; ta.rows=1; ta.placeholder='Non renseigné';
+  ta.className='form-field-textarea'; ta.value=val||''; ta.rows=1; ta.placeholder=emptyText;
   ta.style.minHeight = '22px';
   ta.addEventListener('input', () => {
     ta.style.height='auto'; ta.style.height=ta.scrollHeight+'px';
@@ -620,16 +639,16 @@ function buildText(col, val) {
   return ta;
 }
 
-function buildNumber(col, val) {
+function buildNumber(col, val, emptyText = 'Non renseigné') {
   const inp = document.createElement('input');
-  inp.type='number'; inp.className='form-field-input'; inp.value=val||''; inp.placeholder='Non renseigné';
+  inp.type='number'; inp.className='form-field-input'; inp.value=val||''; inp.placeholder=emptyText;
   inp.addEventListener('input', () => markDirty(col.id, inp.value===''?null:parseFloat(inp.value)));
   return inp;
 }
 
-function buildLongText(col, val) {
+function buildLongText(col, val, emptyText = 'Non renseigné') {
   const ta = document.createElement('textarea');
-  ta.className='form-field-textarea'; ta.value=val||''; ta.rows=3; ta.placeholder='Non renseigné';
+  ta.className='form-field-textarea'; ta.value=val||''; ta.rows=3; ta.placeholder=emptyText;
   ta.addEventListener('input', () => {
     ta.style.height='auto'; ta.style.height=ta.scrollHeight+'px'; markDirty(col.id, ta.value);
   });
@@ -638,12 +657,12 @@ function buildLongText(col, val) {
 }
 
 // ── Choice (simple) ──
-function buildChoiceSelect(col, currentVal, onChange) {
+function buildChoiceSelect(col, currentVal, emptyText = 'Non renseigné', onChange) {
   const sel = document.createElement('select');
   sel.className = 'form-field-input';
   sel.style.cssText = 'cursor:pointer;appearance:auto;padding:2px 0;';
   const empty = document.createElement('option');
-  empty.value=''; empty.textContent='Non renseigné'; sel.appendChild(empty);
+  empty.value=''; empty.textContent=emptyText; sel.appendChild(empty);
   (col.choices||[]).forEach(c => {
     const o = document.createElement('option');
     o.value=c; o.textContent=c; if(c===currentVal) o.selected=true; sel.appendChild(o);
@@ -742,10 +761,8 @@ function buildChoiceList(col, currentVal, onChange) {
 }
 
 // ── Référence avec recherche ──
-function buildRefSearch(col, currentVal, isMulti, labelField, onChange) {
+function buildRefSearch(col, currentVal, isMulti, labelField, tagColorKey, emptyText = 'Non renseigné', onChange) {
   // Pour RefList, Grist retourne ["L", id1, id2, ...] où "L" est un marqueur de type.
-  // Ce marqueur peut être la chaîne "L", null, ou un objet selon la version.
-  // On garde uniquement les entiers positifs valides.
   const toRefIds = (val) => {
     if (!Array.isArray(val)) return (val && typeof val === 'number' && val > 0) ? [val] : [];
     return val.filter(id => typeof id === 'number' && id > 0);
@@ -758,6 +775,8 @@ function buildRefSearch(col, currentVal, isMulti, labelField, onChange) {
     const ids = toRefIds(val);
     return ids.length > 0 ? ids : [];
   };
+  const tagPalette = TAG_COLORS.find(c => c.key === tagColorKey) || TAG_COLORS[0];
+
   let selected = toInitialSelected(currentVal);
 
   const wrap = document.createElement('div');
@@ -774,9 +793,16 @@ function buildRefSearch(col, currentVal, isMulti, labelField, onChange) {
 
   const renderTags = () => {
     tagsRow.innerHTML = '';
+    if (selected.length === 0) {
+      const placeholder = document.createElement('span');
+      placeholder.textContent = emptyText;
+      placeholder.style.cssText = 'font-size:12px;color:var(--text-muted);font-style:italic;padding:2px 0;';
+      tagsRow.appendChild(placeholder);
+      return;
+    }
     selected.forEach((id, i) => {
       const lbl = getRefLabel(col.refTable, id, labelField);
-      const tag = makePill(lbl, '#e8f0fe', '#1a73e8', () => {
+      const tag = makePill(lbl, tagPalette.bg, tagPalette.text, () => {
         selected.splice(i,1); renderTags();
         onChange(isMulti ? ['L', ...selected] : (selected[0]??null));
         updateCellEmpty();
@@ -909,22 +935,53 @@ function addOverlay(div, idx) {
   } else if (item.kind === 'field') {
     const col = allColumns.find(c => c.id === item.colId);
 
-    // Boutons largeur
-    [{l:'1/3',s:2},{l:'1/2',s:3},{l:'2/3',s:4},{l:'Plein',s:6}].forEach(opt => {
-      const btn = tbBtn(opt.l, item.span===opt.s);
-      btn.addEventListener('click', e => { e.stopPropagation(); layout[idx].span=opt.s; saveLayout(); renderForm(); });
-      tb.appendChild(btn);
+    // Sélecteur de largeur compact
+    const spanSel = document.createElement('select');
+    spanSel.style.cssText = 'padding:2px 4px;border:1px solid var(--border);border-radius:4px;font-size:11px;font-family:var(--font);background:var(--surface);color:var(--text);cursor:pointer;height:22px;';
+    [{l:'⅓ Largeur',s:2},{l:'½ Largeur',s:3},{l:'⅔ Largeur',s:4},{l:'↔ Plein',s:6}].forEach(opt => {
+      const o = document.createElement('option');
+      o.value = opt.s; o.textContent = opt.l;
+      if (item.span === opt.s) o.selected = true;
+      spanSel.appendChild(o);
     });
+    spanSel.addEventListener('mousedown', e => e.stopPropagation());
+    spanSel.addEventListener('change', e => { e.stopPropagation(); layout[idx].span = parseInt(spanSel.value); saveLayout(); renderForm(); });
+    tb.appendChild(spanSel);
 
-    // Bouton champ d'affichage (Ref / RefList uniquement)
-    if (col && (col.kind === 'ref' || col.kind === 'refList') && col.refTable && refData[col.refTable]) {
-      const pickBtn = tbBtn('🔍 Champ affiché', false);
-      pickBtn.addEventListener('click', e => {
+    // Boutons ref/refList
+    if (col && (col.kind === 'ref' || col.kind === 'refList') && col.refTable) {
+      if (refData[col.refTable]) {
+        const pickBtn = tbBtn('🔍 Champ affiché', false);
+        pickBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          showRefFieldPicker(idx, col.refTable, item.refLabelField);
+        });
+        tb.appendChild(pickBtn);
+      }
+      const tagColorBtn = tbBtn('🏷 Couleur tag', false);
+      tagColorBtn.addEventListener('click', e => {
         e.stopPropagation();
-        showRefFieldPicker(idx, col.refTable, item.refLabelField);
+        showTagColorPicker(idx, tagColorBtn, item.tagColor || 'blue');
       });
-      tb.appendChild(pickBtn);
+      tb.appendChild(tagColorBtn);
     }
+
+    // Emoji
+    const emojiBtn = tbBtn((item.emoji || '☐') + ' Icône', false);
+    emojiBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      showEmojiPicker(idx, emojiBtn, item.emoji || '');
+    });
+    tb.appendChild(emojiBtn);
+
+    // Texte vide personnalisé
+    const emptyBtn = tbBtn('💬 Texte vide', false);
+    emptyBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      const v = prompt('Texte affiché quand le champ est vide :', item.emptyText || 'Non renseigné');
+      if (v !== null) { layout[idx].emptyText = v.trim() || ''; saveLayout(); renderForm(); }
+    });
+    tb.appendChild(emptyBtn);
 
     // Renommer
     const renBtn = tbBtn('✏ Renommer', false);
@@ -953,8 +1010,119 @@ function tbBtn(label, active, danger=false) {
   return btn;
 }
 
+// ── Picker emoji pour les champs ──
+function showEmojiPicker(layoutIdx, anchorBtn, currentEmoji) {
+  const old = document.getElementById('emoji-picker');
+  if (old) { old.remove(); return; }
 
-// ── Mini-modal pour choisir le champ d'affichage d'une référence ──
+  const EMOJIS = [
+    '👤','👥','🏢','📍','📌','📅','🗓','⏰','💶','💰','📊','📈',
+    '🎯','🚀','💡','🔑','📝','💬','✅','❌','⚠️','🔗','📎','📂',
+    '📁','🗂','📋','🔧','⚙️','🌐','📧','📱','💻','🏠','🏗','🔢',
+    '🏷','🎨','📦','🚚',
+  ];
+
+  const pop = document.createElement('div');
+  pop.id = 'emoji-picker';
+  const rect = anchorBtn.getBoundingClientRect();
+  pop.style.cssText = `
+    position:fixed;top:${rect.bottom + 6}px;left:${rect.left}px;z-index:500;
+    background:var(--surface);border:1px solid var(--border);border-radius:8px;
+    box-shadow:0 4px 16px rgba(0,0,0,0.14);padding:10px;width:230px;box-sizing:border-box;
+  `;
+  // Empêche les clics à l'intérieur de fermer le popover
+  pop.addEventListener('click', e => e.stopPropagation());
+
+  // Input libre
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:6px;margin-bottom:8px;align-items:center;';
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.placeholder = 'Coller ou taper une emoji…';
+  inp.value = currentEmoji;
+  inp.style.cssText = 'flex:1;min-width:0;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:16px;font-family:var(--font);box-sizing:border-box;';
+  const clearBtn = document.createElement('button');
+  clearBtn.textContent = '✕';
+  clearBtn.title = 'Retirer l\'icône';
+  clearBtn.style.cssText = 'flex-shrink:0;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:none;cursor:pointer;color:var(--text-muted);';
+  clearBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    layout[layoutIdx].emoji = '';
+    saveLayout(); renderForm(); pop.remove();
+  });
+  row.appendChild(inp); row.appendChild(clearBtn);
+  pop.appendChild(row);
+
+  // Grille rapide
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;';
+  EMOJIS.forEach(em => {
+    const btn = document.createElement('button');
+    btn.textContent = em;
+    btn.title = em;
+    btn.style.cssText = `
+      width:30px;height:30px;border:1.5px solid ${em === currentEmoji ? 'var(--accent)' : 'transparent'};
+      border-radius:4px;background:${em === currentEmoji ? 'var(--accent-light)' : 'none'};
+      cursor:pointer;font-size:16px;line-height:1;transition:background .1s;
+    `;
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      layout[layoutIdx].emoji = em;
+      saveLayout(); renderForm(); pop.remove();
+    });
+    grid.appendChild(btn);
+  });
+  pop.appendChild(grid);
+
+  // Valider l'input libre
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.stopPropagation();
+      layout[layoutIdx].emoji = inp.value.trim();
+      saveLayout(); renderForm(); pop.remove();
+    }
+  });
+
+  document.addEventListener('click', () => pop.remove(), { once: true });
+  document.body.appendChild(pop);
+}
+
+// ── Picker couleur pour les tags ref/refList ──
+function showTagColorPicker(layoutIdx, anchorBtn, currentKey) {
+  const old = document.getElementById('tag-color-picker');
+  if (old) { old.remove(); return; }
+
+  const pop = document.createElement('div');
+  pop.id = 'tag-color-picker';
+  const rect = anchorBtn.getBoundingClientRect();
+  pop.style.cssText = `
+    position:fixed;top:${rect.bottom + 6}px;left:${rect.left}px;z-index:500;
+    background:var(--surface);border:1px solid var(--border);border-radius:6px;
+    box-shadow:0 4px 16px rgba(0,0,0,0.14);padding:8px;
+    display:flex;flex-wrap:wrap;gap:6px;width:186px;
+  `;
+
+  TAG_COLORS.forEach(c => {
+    const swatch = document.createElement('button');
+    swatch.title = c.label;
+    swatch.style.cssText = `
+      width:32px;height:32px;border-radius:6px;border:2px solid ${c.key === currentKey ? c.text : 'transparent'};
+      background:${c.bg};cursor:pointer;display:flex;align-items:center;justify-content:center;
+      font-size:11px;font-weight:700;color:${c.text};transition:border .1s;
+    `;
+    swatch.textContent = 'Aa';
+    swatch.addEventListener('click', e => {
+      e.stopPropagation();
+      layout[layoutIdx].tagColor = c.key;
+      saveLayout(); renderForm(); pop.remove();
+    });
+    pop.appendChild(swatch);
+  });
+
+  document.addEventListener('click', () => pop.remove(), { once: true });
+  document.body.appendChild(pop);
+}
+
+// ── Mini-modal pour choisir le champ de recherche d'une référence ──
 function showRefFieldPicker(layoutIdx, refTableId, currentField) {
   const data = refData[refTableId];
   if (!data) return;
