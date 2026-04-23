@@ -335,12 +335,15 @@ function setupProductSearch() {
     dropdown.style.display = 'block';
   };
 
-  input.addEventListener('focus', () => renderDropdown(input.value));
+  input.addEventListener('focus', () => {
+    input.value = ''; // vide l'entrée pour montrer toute la liste
+    renderDropdown('');
+  });
   input.addEventListener('input', () => renderDropdown(input.value));
   input.addEventListener('blur', () => {
     setTimeout(() => {
       dropdown.style.display = 'none';
-      // Réinitialise l'input au label du record courant
+      // Restaure le label du record courant si aucune sélection n'a été faite
       if (currentRecord) {
         const p = _productLabels.find(p => p.id === currentRecord.id);
         input.value = p ? p.label : '';
