@@ -67,14 +67,6 @@
     position: sticky; top: 0; z-index: 200;
   }
   .tb-label { font-size: 12px; color: var(--text-label); white-space: nowrap; }
-  #product-select {
-    height: 28px; min-width: 220px; max-width: 360px; flex: 1;
-    border: 1px solid var(--border); border-radius: var(--r);
-    background: var(--surface); color: var(--text);
-    font-family: var(--font); font-size: 13px; padding: 0 8px;
-    outline: none; cursor: pointer;
-  }
-  #product-select:focus { border-color: var(--accent); }
   #product-count { font-size: 12px; color: var(--text-muted); }
   .tb-spacer { flex: 1; }
 
@@ -429,7 +421,6 @@
     border-top: 1px solid var(--border);
     flex-wrap: wrap;
   }
-  .edit-mode ~ #add-bar,
   #add-bar.visible { display: flex; }
 
   .add-btn {
@@ -522,16 +513,113 @@
   ::-webkit-scrollbar { width: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  /* ══ RECHERCHE PRODUIT ══ */
+  #product-search-input {
+    height: 28px; width: 100%;
+    border: 1px solid var(--border); border-radius: var(--r);
+    padding: 0 28px 0 8px;
+    font-family: var(--font); font-size: 13px;
+    outline: none; cursor: pointer;
+    background: var(--surface); color: var(--text);
+  }
+  #product-search-input:focus { border-color: var(--accent); cursor: text; }
+  #product-search-icon {
+    position: absolute; right: 8px; top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none; color: var(--text-muted);
+  }
+  #product-dropdown {
+    display: none; position: absolute;
+    top: calc(100% + 4px); left: 0; right: 0; z-index: 300;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+    max-height: 280px; overflow-y: auto;
+  }
+
+  /* ══ TOOLBAR À DROITE (pour titre et desc) ══ */
+  .el-toolbar-right {
+    left: auto !important;
+    right: 0 !important;
+  }
+
+  /* ══ INDICATEUR ÉDITABLE (contenteditable en mode config) ══ */
+  .edit-mode [contenteditable="true"] {
+    cursor: text;
+    border-bottom: 1.5px dashed var(--border);
+    padding-bottom: 1px;
+    outline: none;
+    caret-color: var(--accent);
+  }
+  .edit-mode [contenteditable="true"]:focus {
+    border-bottom-color: var(--accent);
+    background: rgba(0,0,145,0.03);
+    border-radius: 2px;
+  }
+
+  /* ══ BTN-EDIT en mode config (vert "Sauvegarder") ══ */
+  #btn-edit.config-mode {
+    background: var(--success);
+    border-color: var(--success);
+    color: #fff;
+  }
+  #btn-edit.config-mode:hover { filter: brightness(1.1); }
+
+  /* ══ CHAMP DATE ══ */
+  input[type="date"].form-field-input,
+  input[type="datetime-local"].form-field-input {
+    cursor: pointer;
+  }
+
+  /* ══ CHAMP PIÈCE JOINTE ══ */
+  .attachment-wrap { display: flex; flex-direction: column; gap: 6px; padding: 2px 0; }
+  .attachment-list { display: flex; flex-wrap: wrap; gap: 4px; }
+  .attachment-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; border-radius: 10px;
+    background: #e8f0fe; color: #1a73e8;
+    font-size: 11px; font-weight: 600;
+  }
+  .attachment-add-btn {
+    height: 24px; padding: 0 10px;
+    border: 1.5px dashed var(--accent); border-radius: var(--r);
+    background: var(--accent-light); color: var(--accent);
+    font-family: var(--font); font-size: 11px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 4px;
+    transition: background .1s;
+  }
+  .attachment-add-btn:hover { background: var(--accent); color: #fff; }
 </style>
 </head>
 <body>
 
 <!-- TOP BAR -->
 <div id="topbar">
-  <span class="tb-label">Produit</span>
-  <select id="product-select"><option value="">— Sélectionner —</option></select>
-  <span id="product-count"></span>
-  <div class="tb-spacer"></div>
+  <!-- Zone produit (visible en mode normal) -->
+  <div id="topbar-product" style="display:flex;align-items:center;gap:8px;flex:1;min-width:0;">
+    <span class="tb-label">Produit</span>
+    <div id="product-search-wrap" style="position:relative;flex:1;min-width:180px;max-width:360px;">
+      <input id="product-search-input" type="text" placeholder="— Rechercher un produit —" autocomplete="off">
+      <svg id="product-search-icon" width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M6 2a4 4 0 100 8 4 4 0 000-8zM0 6a6 6 0 1110.89 3.477l4.817 4.816a.75.75 0 01-1.06 1.06l-4.815-4.815A6 6 0 010 6z"/></svg>
+      <div id="product-dropdown"></div>
+    </div>
+    <span id="product-count"></span>
+  </div>
+  <!-- Zone ajout sections (visible en mode configuration) -->
+  <div id="topbar-edit-actions" style="display:none;align-items:center;gap:6px;flex:1;min-width:0;">
+    <span style="font-size:11px;color:var(--text-muted);white-space:nowrap;flex-shrink:0;">Ajouter :</span>
+    <button class="tb-btn" onclick="addItem('title')">+ Section</button>
+    <button class="tb-btn" onclick="addItem('desc')">+ Texte</button>
+    <button class="tb-btn" onclick="addItem('separator')">+ Séparateur</button>
+    <button class="tb-btn" onclick="openFieldPicker()">+ Champ</button>
+    <div style="flex:1"></div>
+    <button class="tb-btn" style="border-color:var(--danger);color:var(--danger)" onclick="resetLayout()"
+      onmouseover="this.style.background='#fde8ea'" onmouseout="this.style.background=''">
+      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z"/></svg>
+      Tout retirer
+    </button>
+  </div>
   <button id="btn-discard" onclick="discardChanges()">Annuler</button>
   <button id="btn-save" onclick="saveChanges()">
     <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>
@@ -550,7 +638,6 @@
   <div id="edit-banner">
     <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 110 14A7 7 0 018 1zm0 1.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM8 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 018 6zm0-2.5a1 1 0 110 2 1 1 0 010-2z"/></svg>
     Mode configuration — glissez les éléments pour les réorganiser, survolez-les pour les modifier
-    <button class="tb-btn" style="margin-left:auto;height:22px;font-size:11px" onclick="toggleEditMode()">Terminer</button>
   </div>
 
   <div id="loading"><div class="spinner"></div><span>Connexion à Grist…</span></div>
@@ -567,33 +654,8 @@
 
   <div id="product-form" style="display:none"></div>
 
-  <!-- Barre d'ajout (visible seulement en mode édition) -->
-  <div id="add-bar">
-    <span style="font-size:11px;color:var(--text-muted);align-self:center;margin-right:4px">Ajouter :</span>
-    <button class="add-btn" onclick="addItem('title')">
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M7.75 2a.75.75 0 01.75.75V7h4.25a.75.75 0 010 1.5H8.5v4.25a.75.75 0 01-1.5 0V8.5H2.75a.75.75 0 010-1.5H7V2.75A.75.75 0 017.75 2z"/></svg>
-      Titre
-    </button>
-    <button class="add-btn" onclick="addItem('desc')">
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0114.25 14H1.75A1.75 1.75 0 010 12.25v-8.5C0 2.784.784 2 1.75 2zM1.5 12.25c0 .138.112.25.25.25h12.5a.25.25 0 00.25-.25v-8.5a.25.25 0 00-.25-.25H1.75a.25.25 0 00-.25.25zM3 6.25a.75.75 0 01.75-.75h8.5a.75.75 0 010 1.5h-8.5A.75.75 0 013 6.25zm0 3a.75.75 0 01.75-.75h5a.75.75 0 010 1.5h-5A.75.75 0 013 9.25z"/></svg>
-      Texte
-    </button>
-    <button class="add-btn" onclick="addItem('separator')">
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M1 8a.75.75 0 01.75-.75h12.5a.75.75 0 010 1.5H1.75A.75.75 0 011 8z"/></svg>
-      Séparateur
-    </button>
-    <button class="add-btn" onclick="openFieldPicker()">
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="2" width="12" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7.75 5a.75.75 0 01.75.75V7h1.25a.75.75 0 010 1.5H8.5v1.25a.75.75 0 01-1.5 0V8.5H5.75a.75.75 0 010-1.5H7V5.75A.75.75 0 017.75 5z"/></svg>
-      Champ
-    </button>
-    <div style="flex:1"></div>
-    <button class="add-btn" style="border-color:var(--danger);color:var(--danger)" onclick="resetLayout()"
-      onmouseover="this.style.background='#fde8ea';this.style.borderStyle='solid'"
-      onmouseout="this.style.background='transparent';this.style.borderStyle='dashed'">
-      <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z"/></svg>
-      Tout retirer
-    </button>
-  </div>
+  <!-- Barre d'ajout (cachée — les boutons sont dans le topbar en mode config) -->
+  <div id="add-bar" style="display:none"></div>
 
 </div>
 

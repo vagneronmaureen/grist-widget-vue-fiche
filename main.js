@@ -22,7 +22,7 @@ let layout = [];
 
 // Tailles de police pour titres et descriptions
 const TITLE_SIZES = { s:'11px', m:'13px', l:'16px', xl:'20px' };
-const DESC_SIZES  = { s:'10px', m:'12px', l:'14px' };
+const DESC_SIZES  = { s:'10px', m:'12px', l:'14px', xl:'18px' };
 
 // Palette Notion (clés utilisées comme data-color et pour le color picker)
 const NOTION_COLORS = [
@@ -133,6 +133,9 @@ async function loadColumnMeta() {
 
       } else if (type === 'Bool')              col.kind = 'bool';
       else if (type === 'Numeric'||type==='Int') col.kind = 'number';
+      else if (type === 'Date')                col.kind = 'date';
+      else if (type === 'DateTime')            col.kind = 'datetime';
+      else if (type === 'Attachments')         col.kind = 'attachment';
       else if (type === 'Text'||type==='Any')  col.kind = 'text';
     });
 
@@ -263,31 +266,96 @@ grist.onRecord((record) => {
   pendingChanges = {};
   updateSaveButtons();
   renderForm();
-  el('product-select').value = record.id;
+  // Met à jour l'input de recherche produit
+  const _p = _productLabels.find(p => p.id === record.id);
+  el('product-search-input').value = _p ? _p.label : getProductLabel(record);
 });
 
 // ══════════════════════════════════════════════
-// SÉLECTEUR PRODUIT
+// SÉLECTEUR PRODUIT (recherche avec dropdown)
 // ══════════════════════════════════════════════
-function populateSelect() {
-  const sel = el('product-select'), prev = sel.value;
-  sel.innerHTML = '<option value="">— Sélectionner —</option>';
+let _productLabels = []; // cache [{id, label}]
+
+function getProductLabel(r) {
   const nf = allColumns.find(c => /nom|name|titre|title|label|produit|product|designation|ref/i.test(c.id));
-  allRecords.forEach(r => {
-    const o = document.createElement('option');
-    o.value = r.id;
-    o.textContent = nf ? (r[nf.id] || `#${r.id}`) : `Enregistrement #${r.id}`;
-    sel.appendChild(o);
-  });
-  sel.value = prev || (currentRecord ? currentRecord.id : '');
+  return nf ? (r[nf.id] || `#${r.id}`) : `Enregistrement #${r.id}`;
+}
+
+function populateSelect() {
+  _productLabels = allRecords.map(r => ({ id: r.id, label: getProductLabel(r) }));
   const n = allRecords.length;
   el('product-count').textContent = `${n} produit${n>1?'s':''}`;
+  // Met à jour l'input si un record est sélectionné
+  if (currentRecord) {
+    const p = _productLabels.find(p => p.id === currentRecord.id);
+    el('product-search-input').value = p ? p.label : '';
+  }
 }
-el('product-select').addEventListener('change', async (e) => {
-  const id = parseInt(e.target.value);
-  if (!id) { el('product-form').style.display='none'; show('empty-state'); return; }
-  await grist.setCursorPos({ rowId: id });
-});
+
+function setupProductSearch() {
+  const input = el('product-search-input');
+  const dropdown = el('product-dropdown');
+
+  const renderDropdown = (query) => {
+    dropdown.innerHTML = '';
+    const q = (query || '').toLowerCase();
+    const items = _productLabels.filter(p => !q || p.label.toLowerCase().includes(q));
+
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.style.cssText = 'padding:10px 12px;color:var(--text-muted);font-size:12px;text-align:center;';
+      empty.textContent = q ? 'Aucun résultat' : 'Aucun enregistrement';
+      dropdown.appendChild(empty);
+    } else {
+      items.forEach(p => {
+        const isCurrent = currentRecord && currentRecord.id === p.id;
+        const row = document.createElement('div');
+        row.style.cssText = `padding:7px 12px;cursor:pointer;font-size:13px;transition:background .1s;
+          ${isCurrent ? 'background:var(--accent-light);color:var(--accent);font-weight:600;' : ''}`;
+        // Surlignage de la recherche
+        if (q) {
+          const qi = p.label.toLowerCase().indexOf(q);
+          row.innerHTML = qi >= 0
+            ? escHtml(p.label.slice(0,qi)) + `<strong style="color:var(--accent)">${escHtml(p.label.slice(qi,qi+q.length))}</strong>` + escHtml(p.label.slice(qi+q.length))
+            : escHtml(p.label);
+        } else {
+          row.textContent = p.label;
+        }
+        row.addEventListener('mouseenter', () => { if (!isCurrent) row.style.background = 'var(--bg)'; });
+        row.addEventListener('mouseleave', () => { if (!isCurrent) row.style.background = ''; });
+        row.addEventListener('mousedown', async e => {
+          e.preventDefault();
+          dropdown.style.display = 'none';
+          if (!p.id) { el('product-form').style.display='none'; show('empty-state'); return; }
+          await grist.setCursorPos({ rowId: p.id });
+        });
+        dropdown.appendChild(row);
+      });
+    }
+    dropdown.style.display = 'block';
+  };
+
+  input.addEventListener('focus', () => renderDropdown(input.value));
+  input.addEventListener('input', () => renderDropdown(input.value));
+  input.addEventListener('blur', () => {
+    setTimeout(() => {
+      dropdown.style.display = 'none';
+      // Réinitialise l'input au label du record courant
+      if (currentRecord) {
+        const p = _productLabels.find(p => p.id === currentRecord.id);
+        input.value = p ? p.label : '';
+      } else {
+        input.value = '';
+      }
+    }, 160);
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { dropdown.style.display = 'none'; input.blur(); }
+  });
+  document.addEventListener('click', e => {
+    if (!el('product-search-wrap').contains(e.target)) dropdown.style.display = 'none';
+  });
+}
 
 // ══════════════════════════════════════════════
 // MODIFICATIONS & SAUVEGARDE
@@ -318,10 +386,22 @@ function discardChanges() { pendingChanges = {}; updateSaveButtons(); renderForm
 // ══════════════════════════════════════════════
 function toggleEditMode() {
   editMode = !editMode;
-  el('btn-edit').classList.toggle('active', editMode);
   el('product-form').classList.toggle('edit-mode', editMode);
   el('edit-banner').classList.toggle('visible', editMode);
-  el('add-bar').style.display = editMode ? 'flex' : 'none';
+
+  // Topbar : swap produit ↔ actions configuration
+  el('topbar-product').style.display = editMode ? 'none' : 'flex';
+  el('topbar-edit-actions').style.display = editMode ? 'flex' : 'none';
+
+  // Bouton : "Configurer" ↔ "Sauvegarder" (vert)
+  const btn = el('btn-edit');
+  if (editMode) {
+    btn.innerHTML = `<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg> Sauvegarder`;
+    btn.classList.add('config-mode');
+  } else {
+    btn.innerHTML = `<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 01-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 00-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 000-.354l-1.086-1.086zM11.189 6.25L9.75 4.81l-6.286 6.287a.25.25 0 00-.064.108l-.558 1.953 1.953-.558a.25.25 0 00.108-.065L11.19 6.25z"/></svg> Configurer`;
+    btn.classList.remove('config-mode');
+  }
   renderForm();
 }
 
@@ -599,6 +679,9 @@ function buildFieldCell(item, idx) {
   else if (kind === 'choiceList') cell.appendChild(buildChoiceList(col, val, v => markDirty(item.colId, v)));
   else if (kind === 'ref')        cell.appendChild(buildRefSearch(col, val, false, item.refLabelField, item.tagColor, emptyText, v => markDirty(item.colId, v)));
   else if (kind === 'refList')    cell.appendChild(buildRefSearch(col, val, true,  item.refLabelField, item.tagColor, emptyText, v => markDirty(item.colId, v)));
+  else if (kind === 'date')       cell.appendChild(buildDate(col, val, false, emptyText));
+  else if (kind === 'datetime')   cell.appendChild(buildDate(col, val, true, emptyText));
+  else if (kind === 'attachment') cell.appendChild(buildAttachment(col, val, emptyText));
   else if (kind === 'longtext' || (typeof rawVal==='string' && rawVal.length>80)) cell.appendChild(buildLongText(col, val, emptyText));
   else if (kind === 'number')     cell.appendChild(buildNumber(col, val, emptyText));
   else                            cell.appendChild(buildText(col, val, emptyText));
@@ -608,10 +691,22 @@ function buildFieldCell(item, idx) {
 
 function formatValPreview(val, col, labelField) {
   if (val===null||val===undefined||val==='') return 'Non renseigné';
-  if (col.kind==='ref')     return getRefLabel(col.refTable, val, labelField);
-  if (col.kind==='refList') return (Array.isArray(val)?val.filter(id=>typeof id==='number'&&id>0):[val]).map(id=>getRefLabel(col.refTable,id,labelField)).join(', ');
-  if (Array.isArray(val))   return val.join(', ');
+  if (col.kind==='ref')        return getRefLabel(col.refTable, val, labelField);
+  if (col.kind==='refList')    return (Array.isArray(val)?val.filter(id=>typeof id==='number'&&id>0):[val]).map(id=>getRefLabel(col.refTable,id,labelField)).join(', ');
+  if (col.kind==='date')       return formatDatePreview(val, false);
+  if (col.kind==='datetime')   return formatDatePreview(val, true);
+  if (col.kind==='attachment') { const ids=Array.isArray(val)?val.filter(v=>typeof v==='number'&&v>0):[]; return ids.length?`${ids.length} pièce(s) jointe(s)`:'Aucune'; }
+  if (Array.isArray(val))      return val.join(', ');
   return String(val);
+}
+
+function formatDatePreview(val, withTime) {
+  if (!val) return 'Non renseigné';
+  try {
+    const ms = withTime ? val * 1000 : val * 86400000;
+    const d = new Date(ms);
+    return withTime ? d.toLocaleString('fr-FR') : d.toLocaleDateString('fr-FR');
+  } catch(e) { return String(val); }
 }
 
 // ══════════════════════════════════════════════
@@ -654,6 +749,104 @@ function buildLongText(col, val, emptyText = 'Non renseigné') {
   });
   setTimeout(() => { ta.style.height='auto'; ta.style.height=ta.scrollHeight+'px'; }, 0);
   return ta;
+}
+
+// ── Date / DateTime ──
+function buildDate(col, val, withTime, emptyText = 'Non renseigné') {
+  const inp = document.createElement('input');
+  inp.type = withTime ? 'datetime-local' : 'date';
+  inp.className = 'form-field-input';
+  inp.placeholder = emptyText;
+
+  if (val && typeof val === 'number') {
+    try {
+      const ms = withTime ? val * 1000 : val * 86400000;
+      const d = new Date(ms);
+      if (withTime) {
+        // datetime-local needs "YYYY-MM-DDTHH:MM"
+        const pad = n => String(n).padStart(2,'0');
+        inp.value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      } else {
+        inp.value = d.toISOString().split('T')[0];
+      }
+    } catch(e) {}
+  }
+
+  inp.addEventListener('change', () => {
+    if (!inp.value) { markDirty(col.id, null); return; }
+    const d = new Date(inp.value);
+    if (isNaN(d)) { markDirty(col.id, null); return; }
+    // Grist stocke Date en jours depuis epoch, DateTime en secondes
+    markDirty(col.id, withTime ? Math.round(d.getTime() / 1000) : Math.round(d.getTime() / 86400000));
+  });
+  return inp;
+}
+
+// ── Pièce jointe ──
+function buildAttachment(col, val, emptyText = 'Non renseigné') {
+  const ids = Array.isArray(val) ? val.filter(v => typeof v === 'number' && v > 0) : [];
+
+  const wrap = document.createElement('div');
+  wrap.className = 'attachment-wrap';
+
+  // Affichage des pièces jointes existantes
+  if (ids.length > 0) {
+    const list = document.createElement('div');
+    list.className = 'attachment-list';
+    ids.forEach((id, i) => {
+      const chip = document.createElement('span');
+      chip.className = 'attachment-chip';
+      chip.innerHTML = `<svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M3 2a1 1 0 011-1h7.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0114 3.414V14a1 1 0 01-1 1H4a1 1 0 01-1-1V2z"/></svg> Fichier ${i+1}`;
+      // Croix de suppression
+      const rm = document.createElement('span');
+      rm.textContent = '×'; rm.style.cssText = 'cursor:pointer;font-size:13px;opacity:.7;';
+      rm.addEventListener('click', e => {
+        e.stopPropagation();
+        const newIds = ids.filter((_, j) => j !== i);
+        markDirty(col.id, newIds.length ? ['L', ...newIds] : null);
+        const cell = wrap.closest('.form-field');
+        if (cell) cell.classList.toggle('field-empty', newIds.length === 0);
+      });
+      chip.appendChild(rm);
+      list.appendChild(chip);
+    });
+    wrap.appendChild(list);
+  } else {
+    const empty = document.createElement('span');
+    empty.textContent = emptyText;
+    empty.style.cssText = 'font-size:12px;color:var(--text-muted);font-style:italic;';
+    wrap.appendChild(empty);
+  }
+
+  // Bouton ajouter
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file'; fileInput.multiple = true; fileInput.style.display = 'none';
+  fileInput.addEventListener('change', async () => {
+    const files = Array.from(fileInput.files);
+    if (!files.length) return;
+    try {
+      const newIds = [];
+      for (const file of files) {
+        const id = await grist.docApi.uploadAttachment(file);
+        newIds.push(id);
+      }
+      const allIds = [...ids, ...newIds];
+      markDirty(col.id, ['L', ...allIds]);
+      showToast(`${files.length} fichier(s) ajouté(s)`);
+    } catch(e) {
+      showToast('Gestion des PJ via Grist directement — ' + e.message, 4000);
+    }
+    fileInput.value = '';
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'attachment-add-btn';
+  addBtn.innerHTML = `<svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M7.75 2a.75.75 0 01.75.75V7h4.25a.75.75 0 010 1.5H8.5v4.25a.75.75 0 01-1.5 0V8.5H2.75a.75.75 0 010-1.5H7V2.75A.75.75 0 017.75 2z"/></svg> Ajouter un fichier`;
+  addBtn.addEventListener('click', () => fileInput.click());
+
+  wrap.appendChild(fileInput);
+  wrap.appendChild(addBtn);
+  return wrap;
 }
 
 // ── Choice (simple) ──
@@ -913,6 +1106,7 @@ function addOverlay(div, idx) {
   tb.appendChild(handle);
 
   if (item.kind === 'title') {
+    tb.classList.add('el-toolbar-right');
     // Taille de police
     [{l:'S',s:'s'},{l:'M',s:'m'},{l:'L',s:'l'},{l:'XL',s:'xl'}].forEach(opt => {
       const btn = tbBtn(opt.l, (item.fontSize||'m') === opt.s);
@@ -925,8 +1119,9 @@ function addOverlay(div, idx) {
     tb.appendChild(colorBtn);
 
   } else if (item.kind === 'desc') {
-    // Taille de police
-    [{l:'S',s:'s'},{l:'M',s:'m'},{l:'L',s:'l'}].forEach(opt => {
+    tb.classList.add('el-toolbar-right');
+    // Taille de police (inclut XL)
+    [{l:'S',s:'s'},{l:'M',s:'m'},{l:'L',s:'l'},{l:'XL',s:'xl'}].forEach(opt => {
       const btn = tbBtn(opt.l, (item.fontSize||'m') === opt.s);
       btn.addEventListener('click', e => { e.stopPropagation(); layout[idx].fontSize=opt.s; saveLayout(); renderForm(); });
       tb.appendChild(btn);
@@ -974,27 +1169,26 @@ function addOverlay(div, idx) {
     });
     tb.appendChild(emojiBtn);
 
-    // Texte vide personnalisé
-    const emptyBtn = tbBtn('💬 Texte vide', false);
+    // Placeholder (texte si champ vide)
+    const emptyBtn = tbBtn('💬 Placeholder', false);
     emptyBtn.addEventListener('click', e => {
       e.stopPropagation();
       showEmptyTextPicker(idx, emptyBtn, item.emptyText || '');
     });
     tb.appendChild(emptyBtn);
 
-    // Renommer
+    // Renommer (dans le widget uniquement, pas dans Grist)
     const renBtn = tbBtn('✏ Renommer', false);
     renBtn.addEventListener('click', e => {
       e.stopPropagation();
-      const v = prompt('Nom affiché :', item.label||item.colId);
-      if (v!==null) { layout[idx].label=v; saveLayout(); renderForm(); }
+      showRenamePicker(idx, renBtn, item.label || item.colId);
     });
     tb.appendChild(renBtn);
   }
-  // desc et separator : uniquement drag handle + supprimer
+  // desc et separator : uniquement drag handle + masquer
 
-  // Supprimer
-  const delBtn = tbBtn('✕ Supprimer', false, true);
+  // Masquer (retire l'élément du layout widget uniquement)
+  const delBtn = tbBtn('✕ Masquer', false, true);
   delBtn.addEventListener('click', e => { e.stopPropagation(); layout.splice(idx,1); saveLayout(); renderForm(); });
   tb.appendChild(delBtn);
 
@@ -1139,6 +1333,58 @@ function showEmptyTextPicker(layoutIdx, anchorBtn, currentText) {
   document.body.appendChild(pop);
 
   // Focus automatique
+  setTimeout(() => { inp.focus(); inp.select(); }, 0);
+}
+
+// ── Picker renommage (widget uniquement, ne modifie pas Grist) ──
+function showRenamePicker(layoutIdx, anchorBtn, currentLabel) {
+  const OLD_ID = 'rename-picker';
+  const old = document.getElementById(OLD_ID);
+  if (old) { old.remove(); return; }
+
+  const pop = document.createElement('div');
+  pop.id = OLD_ID;
+  const rect = anchorBtn.getBoundingClientRect();
+  pop.style.cssText = `
+    position:fixed;top:${rect.bottom + 6}px;left:${rect.left}px;z-index:500;
+    background:var(--surface);border:1px solid var(--border);border-radius:8px;
+    box-shadow:0 4px 16px rgba(0,0,0,0.14);padding:10px;width:260px;box-sizing:border-box;
+  `;
+  pop.addEventListener('click', e => e.stopPropagation());
+
+  const lbl = document.createElement('div');
+  lbl.textContent = 'Nom affiché dans le widget :';
+  lbl.style.cssText = 'font-size:11px;color:var(--text-label);margin-bottom:4px;';
+  const sub = document.createElement('div');
+  sub.textContent = '(ne modifie pas le nom de la colonne dans Grist)';
+  sub.style.cssText = 'font-size:10px;color:var(--text-muted);margin-bottom:8px;font-style:italic;';
+  pop.appendChild(lbl);
+  pop.appendChild(sub);
+
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:6px;align-items:center;';
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.value = currentLabel;
+  inp.style.cssText = 'flex:1;min-width:0;padding:5px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px;font-family:var(--font);box-sizing:border-box;';
+  const okBtn = document.createElement('button');
+  okBtn.textContent = '✓'; okBtn.title = 'Valider';
+  okBtn.style.cssText = 'flex-shrink:0;padding:5px 10px;border:none;border-radius:4px;background:var(--accent);color:#fff;font-size:13px;cursor:pointer;';
+
+  const save = () => {
+    const v = inp.value.trim();
+    if (v) { layout[layoutIdx].label = v; saveLayout(); renderForm(); }
+    pop.remove();
+  };
+  okBtn.addEventListener('click', e => { e.stopPropagation(); save(); });
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.stopPropagation(); save(); }
+    if (e.key === 'Escape') { e.stopPropagation(); pop.remove(); }
+  });
+  row.appendChild(inp); row.appendChild(okBtn);
+  pop.appendChild(row);
+
+  document.addEventListener('click', () => pop.remove(), { once: true });
+  document.body.appendChild(pop);
   setTimeout(() => { inp.focus(); inp.select(); }, 0);
 }
 
@@ -1377,4 +1623,7 @@ function updateRichToolbarState() {
 }
 
 // Initialisation au chargement
-document.addEventListener('DOMContentLoaded', initRichToolbar);
+document.addEventListener('DOMContentLoaded', () => {
+  initRichToolbar();
+  setupProductSearch();
+});
