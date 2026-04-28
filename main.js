@@ -543,11 +543,11 @@ function renderForm() {
       block.className = 'section-block' + (hasColor ? ' has-color' : '')
                        + (item.sectionStyle === 'border' ? ' style-contour' : '');
       if (hasColor && dsfrColor) {
-        if (item.sectionStyle === 'fill') {
-          block.style.background = dsfrColor.bg;
-        } else if (item.sectionStyle === 'border') {
+        if (item.sectionStyle === 'border') {
           block.style.borderLeftColor = dsfrColor.border;
         }
+        // 'fill' : pas de fond sur le bloc lui-même,
+        // l'en-tête et le corps ont chacun leur propre fond
       }
       if (!editMode && item.collapsed && !item.noToggle) block.classList.add('collapsed');
 
@@ -557,7 +557,7 @@ function renderForm() {
       header.className = 'section-header' + (isFirst ? ' first-el' : '') + (canToggle ? ' toggleable' : '');
       header.dataset.idx = idx;
       if (hasColor && dsfrColor && item.sectionStyle === 'fill') {
-        header.style.background = dsfrColor.bgDark || dsfrColor.bg;
+        header.style.background = dsfrColor.bg;
       }
 
       // Flèche toggle (cachée si noToggle)
@@ -1319,7 +1319,7 @@ function addOverlay(div, idx) {
     });
     // Style de section : fond / bordure / aucun
     const style = item.sectionStyle || 'fill';
-    [{l:'Fond',s:'fill'},{l:'Contour',s:'border'},{l:'Aucun',s:'none'}].forEach(opt => {
+    [{l:'Fond',s:'fill'},{l:'Aucun',s:'none'}].forEach(opt => {
       const btn = tbBtn(opt.l, style === opt.s);
       btn.addEventListener('click', e => { e.stopPropagation(); layout[idx].sectionStyle=opt.s; saveLayout(); renderForm(); });
       tb.appendChild(btn);
