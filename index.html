@@ -39,21 +39,12 @@
     --shadow:       0 2px 6px rgba(0,0,0,0.08);
     --r:            4px;
     --font:         'Marianne', system-ui, -apple-system, 'Segoe UI', sans-serif;
-    /* Palette Notion */
-    --notion-gray-bg:#F1F1EF;   --notion-gray-hd:#E9E9E7;
-    --notion-brown-bg:#F4EEEE;  --notion-brown-hd:#EEE4E1;
-    --notion-orange-bg:#FAEBDD; --notion-orange-hd:#F7DFCA;
-    --notion-yellow-bg:#FBF3DB; --notion-yellow-hd:#F8EABE;
-    --notion-green-bg:#EDF3EC;  --notion-green-hd:#DFF0DE;
-    --notion-blue-bg:#E7F3F8;   --notion-blue-hd:#D5EBF5;
-    --notion-purple-bg:#F4F0F9; --notion-purple-hd:#EAE4F5;
-    --notion-pink-bg:#FBE2E9;   --notion-pink-hd:#F7D0DC;
-    --notion-red-bg:#FDEBEC;    --notion-red-hd:#FAD7D9;
+    /* (couleurs sections gérées inline via JS, palette DSFR) */
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: var(--font); font-size: 13px;
-    background: var(--bg); color: var(--text);
+    background: #fff; color: var(--text);
     min-height: 100vh; display: flex; flex-direction: column;
   }
 
@@ -101,7 +92,7 @@
   #btn-discard.visible { display: flex; }
 
   /* ══ CARD AREA ══ */
-  #card-area { flex: 1; overflow-y: auto; padding: 24px 32px; }
+  #card-area { flex: 1; overflow-y: auto; padding: 0 12px 16px; }
 
   #loading, #empty-state {
     display: flex; flex-direction: column; align-items: center;
@@ -114,21 +105,21 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* ══ FORMULAIRE ══ */
+  /* ══ FORMULAIRE (flat, pas de carte) ══ */
   #product-form {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 4px;
+    background: transparent;
+    border: none;
+    border-radius: 0;
     width: 100%;
-    box-shadow: var(--shadow);
-    overflow: visible; /* pour que les toolbars flottantes soient visibles */
+    box-shadow: none;
+    overflow: visible;
     position: relative;
   }
 
-  /* ── Mode édition : bande verte en haut ── */
+  /* ── Mode configuration : liseré bleu ── */
   #product-form.edit-mode {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px var(--accent-light), var(--shadow);
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   /* ══ ÉLÉMENTS DU FORMULAIRE ══ */
@@ -173,10 +164,21 @@
   .form-field-textarea:focus  { border-bottom-color: var(--accent); }
   .form-field-input::placeholder,
   .form-field-textarea::placeholder { color: var(--text-muted); font-style: italic; }
-  /* Champ vide : liseré rouge à gauche (style notice DSFR) */
+  /* Champ vide : liseré rouge à gauche + placeholder mis en valeur */
   .form-field.field-empty {
     border-left: 3px solid var(--danger);
-    padding-left: 17px; /* compense la bordure pour garder l'alignement */
+    padding-left: 17px;
+  }
+  /* Placeholder en mode vue : fond rose-rouge */
+  .field-empty-display {
+    display: inline-block;
+    padding: 2px 8px;
+    background: #fff0f0;
+    border-radius: 4px;
+    color: var(--danger);
+    font-size: 12px;
+    font-style: italic;
+    border: 1px solid #ffd9d9;
   }
   .form-field-textarea { line-height: 1.5; min-height: 52px; }
   .form-field-check-wrap { display: flex; align-items: center; gap: 7px; padding: 3px 0; }
@@ -184,48 +186,42 @@
     width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer;
   }
 
-  /* ══ BLOCS SECTION (style Notion) ══ */
+  /* ══ BLOCS SECTION ══ */
 
-  /* Wrapper qui englobe un titre + tout son contenu */
   .section-block {
-    border-radius: 8px;
-    margin: 6px 0;
-    /* pas d'overflow:hidden — évite de clipper les dropdowns positionnés en absolu */
+    border-radius: 6px;
+    margin: 16px 0;
   }
-  .section-block:first-child { margin-top: 0; }
+  .section-block:first-child { margin-top: 8px; }
   .section-block:last-child  { margin-bottom: 0; }
-  /* Arrondir les coins de l'en-tête (pour les sections colorées) */
-  .section-block .section-header { border-radius: 8px 8px 0 0; }
-  .section-block.collapsed .section-header,
-  .section-block > .section-header:only-of-type { border-radius: 8px; }
-
-  /* Dans un bloc coloré, les grilles n'ont pas de border-top (le fond fait la séparation) */
+  .section-block .section-header { border-radius: 6px 6px 0 0; }
+  .section-block.collapsed .section-header { border-radius: 6px; }
   .section-block.has-color .form-grid { border-top-color: transparent; }
-
-  /* Premier grid dans un section-body : pas de border-top */
   .section-body .form-grid:first-child { border-top: none; }
 
-  /* Couleurs de fond (data-color sur .section-block) */
-  .section-block[data-color="gray"]   { background: var(--notion-gray-bg); }
-  .section-block[data-color="brown"]  { background: var(--notion-brown-bg); }
-  .section-block[data-color="orange"] { background: var(--notion-orange-bg); }
-  .section-block[data-color="yellow"] { background: var(--notion-yellow-bg); }
-  .section-block[data-color="green"]  { background: var(--notion-green-bg); }
-  .section-block[data-color="blue"]   { background: var(--notion-blue-bg); }
-  .section-block[data-color="purple"] { background: var(--notion-purple-bg); }
-  .section-block[data-color="pink"]   { background: var(--notion-pink-bg); }
-  .section-block[data-color="red"]    { background: var(--notion-red-bg); }
+  /* Style contour (bordure gauche uniquement, pas de fond) */
+  .section-block.style-contour {
+    border-left: 4px solid; /* couleur définie inline par JS */
+    border-radius: 0;
+    background: transparent !important;
+    padding-left: 4px;
+  }
+  .section-block.style-contour .section-header {
+    background: transparent !important;
+    border-radius: 0;
+  }
 
-  /* En-tête de section légèrement plus sombre quand colorée */
-  .section-block[data-color="gray"]   .section-header { background: var(--notion-gray-hd); }
-  .section-block[data-color="brown"]  .section-header { background: var(--notion-brown-hd); }
-  .section-block[data-color="orange"] .section-header { background: var(--notion-orange-hd); }
-  .section-block[data-color="yellow"] .section-header { background: var(--notion-yellow-hd); }
-  .section-block[data-color="green"]  .section-header { background: var(--notion-green-hd); }
-  .section-block[data-color="blue"]   .section-header { background: var(--notion-blue-hd); }
-  .section-block[data-color="purple"] .section-header { background: var(--notion-purple-hd); }
-  .section-block[data-color="pink"]   .section-header { background: var(--notion-pink-hd); }
-  .section-block[data-color="red"]    .section-header { background: var(--notion-red-hd); }
+  /* Sections côte à côte (demi-largeur) */
+  .section-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin: 16px 0;
+    align-items: start; /* chaque colonne à la hauteur de son contenu = collapse indépendant */
+  }
+  .section-columns .section-block { margin: 0; }
+  .section-columns .section-block:first-child { margin-top: 0; }
+  .section-columns .section-block:last-child  { margin-bottom: 0; }
 
   /* En-tête de section (remplace .form-section-title) */
   .section-header {
@@ -544,6 +540,13 @@
     right: 0 !important;
   }
 
+  /* Dans une disposition 2 colonnes, ancrer toutes les toolbars à droite
+     pour éviter le débordement hors du cadre (notamment colonne droite) */
+  .section-columns .el-toolbar {
+    left: auto;
+    right: 0;
+  }
+
   /* ══ INDICATEUR ÉDITABLE (contenteditable en mode config) ══ */
   .edit-mode [contenteditable="true"] {
     cursor: text;
@@ -624,6 +627,10 @@
   <button id="btn-save" onclick="saveChanges()">
     <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>
     Enregistrer
+  </button>
+  <button class="tb-btn" id="btn-data-edit" onclick="toggleDataEditMode()" style="display:none">
+    <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 01-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 00-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 000-.354l-1.086-1.086zM11.189 6.25L9.75 4.81l-6.286 6.287a.25.25 0 00-.064.108l-.558 1.953 1.953-.558a.25.25 0 00.108-.065L11.19 6.25z"/></svg>
+    Éditer
   </button>
   <button class="tb-btn" id="btn-edit" onclick="toggleEditMode()">
     <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 01-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 00-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 000-.354l-1.086-1.086zM11.189 6.25L9.75 4.81l-6.286 6.287a.25.25 0 00-.064.108l-.558 1.953 1.953-.558a.25.25 0 00.108-.065L11.19 6.25z"/></svg>

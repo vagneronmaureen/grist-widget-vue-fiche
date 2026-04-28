@@ -6,7 +6,9 @@ let allRecords        = [];
 let currentRecord     = null;
 let pendingChanges    = {};
 let pendingSavedValues = null; // valeurs sauvegardées en attente de confirmation par onRecord
-let editMode          = false;
+let editMode          = false;  // mode configuration layout (owners uniquement)
+let dataEditMode      = false;  // mode édition des données (editors+)
+let userAccess        = null;   // 'owners' | 'editors' | 'viewers' | null
 let tableId           = null;
 
 // Données des tables référencées : { tableId: { columns: [], rows: [{id, ...fields}] } }
@@ -24,18 +26,37 @@ let layout = [];
 const TITLE_SIZES = { s:'11px', m:'13px', l:'16px', xl:'20px' };
 const DESC_SIZES  = { s:'10px', m:'12px', l:'14px', xl:'18px' };
 
-// Palette Notion (clés utilisées comme data-color et pour le color picker)
-const NOTION_COLORS = [
-  { key:'gray',   bg:'#F1F1EF' },
-  { key:'brown',  bg:'#F4EEEE' },
-  { key:'orange', bg:'#FAEBDD' },
-  { key:'yellow', bg:'#FBF3DB' },
-  { key:'green',  bg:'#EDF3EC' },
-  { key:'blue',   bg:'#E7F3F8' },
-  { key:'purple', bg:'#F4F0F9' },
-  { key:'pink',   bg:'#FBE2E9' },
-  { key:'red',    bg:'#FDEBEC' },
+// Palette DSFR — tons pastels conformes au Système de Design de l'État
+// Tokens officiels DSFR v1
+// bg = tinte 975 (très clair), bgDark = tinte 950 (en-tête), border = Sun (couleur principale)
+const DSFR_COLORS = [
+  { key:'gray',   bg:'#f6f6f6', bgDark:'#eeeeee', border:'#3a3a3a', label:'Gris'           },
+  { key:'blue',   bg:'#f5f5fe', bgDark:'#ececfe', border:'#000091', label:'Bleu France'    },
+  { key:'green',  bg:'#e3fdeb', bgDark:'#d6fce2', border:'#18753c', label:'Vert émeraude'  },
+  { key:'teal',   bg:'#e8fdff', bgDark:'#c7faf5', border:'#009099', label:'Écume'          },
+  { key:'red',    bg:'#fff0f0', bgDark:'#fee9e9', border:'#c9191e', label:'Rouge Marianne' },
+  { key:'orange', bg:'#fff3de', bgDark:'#ffdeb8', border:'#b34000', label:'Orange'         },
+  { key:'yellow', bg:'#fef7da', bgDark:'#fef7ba', border:'#716043', label:'Jaune'          },
+  { key:'purple', bg:'#fee7fc', bgDark:'#fcd5f9', border:'#6e445a', label:'Pourpre'        },
+  { key:'pink',   bg:'#ffe9e6', bgDark:'#ffdbd1', border:'#8d533e', label:'Rose'           },
 ];
+
+// Convertit un hex en rgba(r,g,b,alpha)
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// Calcule la position left d'une popup fixed pour qu'elle reste dans le viewport.
+// Si elle déborderait à droite, on l'ancre depuis la droite du bouton déclencheur.
+function safePopLeft(rect, popWidth) {
+  const vw = document.documentElement.clientWidth;
+  return (rect.left + popWidth + 4 > vw)
+    ? Math.max(4, rect.right - popWidth)
+    : rect.left;
+}
 let _idCounter = 1;
 function newId() { return _idCounter++; }
 
@@ -71,6 +92,57 @@ async function loadLayout() {
     const s = localStorage.getItem('sdpc_layout_v7');
     if (s) { layout = JSON.parse(s); _idCounter = Math.max(...layout.map(i=>i.id||0), 0)+1; }
   } catch(_) {}
+}
+
+// ══════════════════════════════════════════════
+// ACCÈS UTILISATEUR
+// ══════════════════════════════════════════════
+function isOwner()  { return !userAccess || userAccess === 'owners'; }
+function canWrite() { return isOwner() || userAccess === 'editors'; }
+
+async function checkUserAccess() {
+  try {
+    const session = await grist.getUserSession();
+    userAccess = session ? (session.access || null) : null;
+  } catch(e) { userAccess = null; }
+  updateAccessUI();
+}
+
+function updateAccessUI() {
+  const btnEdit     = el('btn-edit');
+  const btnDataEdit = el('btn-data-edit');
+  if (btnEdit)     btnEdit.style.display     = isOwner()  ? '' : 'none';
+  if (btnDataEdit) btnDataEdit.style.display = canWrite() ? '' : 'none';
+}
+
+// ── Mode édition des données ──
+function toggleDataEditMode() {
+  if (dataEditMode) {
+    if (hasPendingChanges() && !confirm('Des modifications non enregistrées seront perdues. Continuer ?')) return;
+    dataEditMode = false;
+    pendingChanges = {};
+  } else {
+    dataEditMode = true;
+  }
+  updateTopbarButtons();
+  renderForm();
+}
+
+function updateTopbarButtons() {
+  const btnDataEdit = el('btn-data-edit');
+  if (!btnDataEdit) return;
+  if (editMode) {
+    btnDataEdit.style.display = 'none';
+    return;
+  }
+  btnDataEdit.style.display = canWrite() ? '' : 'none';
+  if (dataEditMode) {
+    btnDataEdit.innerHTML = `<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M7.75 2a.75.75 0 01.75.75V7h4.25a.75.75 0 010 1.5H8.5v4.25a.75.75 0 01-1.5 0V8.5H2.75a.75.75 0 010-1.5H7V2.75A.75.75 0 017.75 2z" transform="rotate(45 8 8)"/><path d="M3.72 3.72a.75.75 0 011.06 0L8 6.94l3.22-3.22a.75.75 0 111.06 1.06L9.06 8l3.22 3.22a.75.75 0 11-1.06 1.06L8 9.06l-3.22 3.22a.75.75 0 01-1.06-1.06L6.94 8 3.72 4.78a.75.75 0 010-1.06z"/></svg> Vue`;
+    btnDataEdit.classList.add('active');
+  } else {
+    btnDataEdit.innerHTML = `<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 01-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 00-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 000-.354l-1.086-1.086zM11.189 6.25L9.75 4.81l-6.286 6.287a.25.25 0 00-.064.108l-.558 1.953 1.953-.558a.25.25 0 00.108-.065L11.19 6.25z"/></svg> Éditer`;
+    btnDataEdit.classList.remove('active');
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -212,6 +284,7 @@ function getRefRows(refTableId, labelField) {
 // ══════════════════════════════════════════════
 grist.ready({ requiredAccess: 'full' });
 loadLayout();
+checkUserAccess();
 
 grist.onRecords(async (records) => {
   allRecords = records;
@@ -366,14 +439,14 @@ function setupProductSearch() {
 function hasPendingChanges() { return Object.keys(pendingChanges).length > 0; }
 function markDirty(colId, value) { pendingChanges[colId] = value; if (pendingSavedValues) delete pendingSavedValues[colId]; updateSaveButtons(); }
 function updateSaveButtons() {
-  const d = hasPendingChanges();
+  const d = hasPendingChanges() && dataEditMode;
   el('btn-save').classList.toggle('visible', d);
   el('btn-discard').classList.toggle('visible', d);
 }
 async function saveChanges() {
   if (!currentRecord || !tableId || !hasPendingChanges()) return;
   const toSave = { ...pendingChanges };
-  pendingSavedValues = { ...pendingSavedValues, ...toSave }; // accumule les valeurs sauvegardées
+  pendingSavedValues = { ...pendingSavedValues, ...toSave };
   pendingChanges = {}; updateSaveButtons();
   try {
     await grist.docApi.applyUserActions([['UpdateRecord', tableId, currentRecord.id, toSave]]);
@@ -389,6 +462,7 @@ function discardChanges() { pendingChanges = {}; updateSaveButtons(); renderForm
 // ══════════════════════════════════════════════
 function toggleEditMode() {
   editMode = !editMode;
+  if (editMode) dataEditMode = false; // config mode désactive l'édition données
   el('product-form').classList.toggle('edit-mode', editMode);
   el('edit-banner').classList.toggle('visible', editMode);
 
@@ -405,6 +479,7 @@ function toggleEditMode() {
     btn.innerHTML = `<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 01-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 00-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 000-.354l-1.086-1.086zM11.189 6.25L9.75 4.81l-6.286 6.287a.25.25 0 00-.064.108l-.558 1.953 1.953-.558a.25.25 0 00.108-.065L11.19 6.25z"/></svg> Configurer`;
     btn.classList.remove('config-mode');
   }
+  updateTopbarButtons();
   renderForm();
 }
 
@@ -423,27 +498,27 @@ function renderForm() {
     return;
   }
 
-  let isFirst          = true;   // pour le style du premier élément (pas de border-top)
-  let grid             = null;   // la ligne <div> en cours de construction
-  let usedCols         = 0;      // nb de colonnes occupées dans la ligne en cours (max 6)
-  let currentContainer = form;   // où appender les items non-titre (form ou section-body)
+  let isFirst          = true;
+  let grid             = null;
+  let usedCols         = 0;
+  let currentContainer = form;
+  let halfWidthBlocks  = [];    // sections demi-largeur en attente d'un wrapper
 
-  // Ajoute la ligne en cours au conteneur courant et remet les compteurs à zéro
   const flushGrid = () => {
-    if (grid) {
-      currentContainer.appendChild(grid);
-      grid     = null;
-      usedCols = 0;
-    }
+    if (grid) { currentContainer.appendChild(grid); grid = null; usedCols = 0; }
   };
-
-  // Retourne la ligne en cours, ou en crée une nouvelle
   const getGrid = () => {
-    if (!grid) {
-      grid = document.createElement('div');
-      grid.className = 'form-grid';
-    }
+    if (!grid) { grid = document.createElement('div'); grid.className = 'form-grid'; }
     return grid;
+  };
+  const flushHalfWidths = () => {
+    if (halfWidthBlocks.length) {
+      const wrapper = document.createElement('div');
+      wrapper.className = 'section-columns';
+      halfWidthBlocks.forEach(b => wrapper.appendChild(b));
+      form.appendChild(wrapper);
+      halfWidthBlocks = [];
+    }
   };
 
   layout.forEach((item, idx) => {
@@ -451,30 +526,48 @@ function renderForm() {
     // ── TITRE DE SECTION ──────────────────────────────────────────
     if (item.kind === 'title') {
       flushGrid();
+      if (!item.halfWidth) flushHalfWidths();
 
-      // Migration inline : s'assure que les nouvelles propriétés existent
-      if (item.collapsed === undefined) item.collapsed = false;
-      if (item.bgColor   === undefined) item.bgColor   = null;
+      // Migration inline
+      if (item.collapsed    === undefined) item.collapsed    = false;
+      if (item.bgColor      === undefined) item.bgColor      = null;
+      if (item.sectionStyle === undefined) item.sectionStyle = 'fill';
+      if (item.noToggle     === undefined) item.noToggle     = false;
 
-      // Bloc section (wrapper)
+      // Couleur DSFR associée
+      const dsfrColor = DSFR_COLORS.find(c => c.key === item.bgColor);
+
+      // Bloc section
       const block = document.createElement('div');
-      block.className = 'section-block' + (item.bgColor ? ' has-color' : '');
-      if (item.bgColor) block.dataset.color = item.bgColor;
-      if (!editMode && item.collapsed) block.classList.add('collapsed');
+      const hasColor = item.bgColor && item.sectionStyle !== 'none';
+      block.className = 'section-block' + (hasColor ? ' has-color' : '')
+                       + (item.sectionStyle === 'border' ? ' style-contour' : '');
+      if (hasColor && dsfrColor) {
+        if (item.sectionStyle === 'fill') {
+          block.style.background = dsfrColor.bg;
+        } else if (item.sectionStyle === 'border') {
+          block.style.borderLeftColor = dsfrColor.border;
+        }
+      }
+      if (!editMode && item.collapsed && !item.noToggle) block.classList.add('collapsed');
 
       // En-tête
+      const canToggle = !editMode && !item.noToggle;
       const header = document.createElement('div');
-      header.className = 'section-header' + (isFirst ? ' first-el' : '') + (!editMode ? ' toggleable' : '');
+      header.className = 'section-header' + (isFirst ? ' first-el' : '') + (canToggle ? ' toggleable' : '');
       header.dataset.idx = idx;
+      if (hasColor && dsfrColor && item.sectionStyle === 'fill') {
+        header.style.background = dsfrColor.bgDark || dsfrColor.bg;
+      }
 
-      // Flèche toggle
+      // Flèche toggle (cachée si noToggle)
       const arrow = document.createElement('span');
-      arrow.className = 'section-toggle-arrow' + (editMode || !item.collapsed ? ' expanded' : '');
+      arrow.className = 'section-toggle-arrow' + (editMode || !item.collapsed || item.noToggle ? ' expanded' : '');
+      if (item.noToggle) arrow.style.display = 'none';
       arrow.innerHTML = `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4l4 4 4-4"/></svg>`;
       header.appendChild(arrow);
 
-      const titleSize = TITLE_SIZES[item.fontSize] || TITLE_SIZES.m;
-      header.style.fontSize = titleSize;
+      header.style.fontSize = TITLE_SIZES[item.fontSize] || TITLE_SIZES.m;
 
       if (editMode) {
         const ce = document.createElement('div');
@@ -492,16 +585,24 @@ function renderForm() {
         const lbl = document.createElement('span');
         lbl.innerHTML = item.label || 'Section';
         header.appendChild(lbl);
-        header.addEventListener('click', () => toggleSection(idx, block, arrow));
+        if (canToggle) header.addEventListener('click', () => toggleSection(idx, block, arrow));
       }
 
-      // Corps de section
       const body = document.createElement('div');
       body.className = 'section-body';
-
+      // Fond des champs à 5 % d'opacité de la couleur principale
+      if (hasColor && dsfrColor && item.sectionStyle === 'fill') {
+        body.style.background = hexToRgba(dsfrColor.border, 0.05);
+      }
       block.appendChild(header);
       block.appendChild(body);
-      form.appendChild(block);
+
+      // Demi-largeur ou pleine largeur
+      if (item.halfWidth) {
+        halfWidthBlocks.push(block);
+      } else {
+        form.appendChild(block);
+      }
 
       currentContainer = body;
       isFirst = false;
@@ -548,6 +649,7 @@ function renderForm() {
   });
 
   flushGrid();
+  flushHalfWidths();
 }
 
 // Toggle collapse/expand d'une section en view mode
@@ -578,12 +680,13 @@ function showColorPicker(idx, anchorBtn) {
   });
   popover.appendChild(noneSwatch);
 
-  // Swatches Notion
-  NOTION_COLORS.forEach(({ key, bg }) => {
+  // Swatches DSFR
+  DSFR_COLORS.forEach(({ key, bg, border, label }) => {
     const sw = document.createElement('div');
     sw.className = 'color-swatch' + (item.bgColor === key ? ' selected' : '');
-    sw.style.background = bg;
-    sw.title = key;
+    // Fond + liseré de la couleur d'accentuation
+    sw.style.cssText = `background:${bg};outline:2px solid ${border};outline-offset:-4px;`;
+    sw.title = label;
     sw.addEventListener('click', e => {
       e.stopPropagation();
       layout[idx].bgColor = key;
@@ -666,17 +769,37 @@ function buildFieldCell(item, idx) {
   label.appendChild(document.createTextNode(item.label || col.label || item.colId));
   cell.appendChild(label);
 
+  const emptyText = item.emptyText || 'Non renseigné';
+
   if (editMode) {
-    // Aperçu désactivé en mode config
+    // Mode configuration : aperçu du placeholder + draggable
+    const previewText = isEmpty ? emptyText : formatValPreview(val, col, item.refLabelField);
     const preview = document.createElement('div');
-    preview.style.cssText = 'font-size:13px;color:var(--text-muted);font-style:italic;padding:3px 0;';
-    preview.textContent = formatValPreview(val, col, item.refLabelField);
+    preview.dataset.preview = '1';
+    preview.style.cssText = `font-size:13px;padding:3px 0;${isEmpty ? 'color:var(--danger);font-style:italic;background:#fdf0f0;border-radius:3px;padding:2px 6px;display:inline-block;' : 'color:var(--text-muted);font-style:italic;'}`;
+    preview.textContent = previewText;
     cell.appendChild(preview);
     addOverlay(cell, idx);
     return cell;
   }
 
-  const emptyText = item.emptyText || 'Non renseigné';
+  if (isEmpty) cell.classList.add('field-empty');
+
+  if (!dataEditMode) {
+    // Mode vue (présentation) : affichage statique
+    if (isEmpty) {
+      const emptySpan = document.createElement('span');
+      emptySpan.className = 'field-empty-display';
+      emptySpan.textContent = emptyText;
+      cell.appendChild(emptySpan);
+    } else {
+      const displayEl = buildFieldDisplay(item, col, val, kind);
+      if (displayEl) cell.appendChild(displayEl);
+    }
+    return cell;
+  }
+
+  // Mode édition données : inputs interactifs
   if      (kind === 'bool')       cell.appendChild(buildBool(col, val));
   else if (kind === 'choice')     cell.appendChild(buildChoiceSelect(col, val, emptyText, v => markDirty(item.colId, v)));
   else if (kind === 'choiceList') cell.appendChild(buildChoiceList(col, val, v => markDirty(item.colId, v)));
@@ -710,6 +833,84 @@ function formatDatePreview(val, withTime) {
     const d = new Date(ms);
     return withTime ? d.toLocaleString('fr-FR') : d.toLocaleDateString('fr-FR');
   } catch(e) { return String(val); }
+}
+
+// ══════════════════════════════════════════════
+// AFFICHAGE EN MODE VUE (lecture seule)
+// ══════════════════════════════════════════════
+function buildFieldDisplay(item, col, val, kind) {
+  // Bool : checkbox désactivée
+  if (kind === 'bool') {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'padding:3px 0;';
+    const chk = document.createElement('input');
+    chk.type = 'checkbox'; chk.checked = !!val; chk.disabled = true;
+    chk.className = 'grist-check';
+    wrap.appendChild(chk);
+    return wrap;
+  }
+  // Ref / RefList : tags colorés
+  if (kind === 'ref' || kind === 'refList') {
+    const refIds = Array.isArray(val) ? val.filter(v => typeof v === 'number' && v > 0)
+                                      : (val && typeof val === 'number' ? [val] : []);
+    if (!refIds.length) return null;
+    const tagPalette = TAG_COLORS.find(c => c.key === item.tagColor) || TAG_COLORS[0];
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px;padding:2px 0;';
+    refIds.forEach(id => {
+      const lbl = getRefLabel(col.refTable, id, item.refLabelField);
+      const tag = document.createElement('span');
+      tag.style.cssText = `display:inline-flex;align-items:center;padding:2px 8px;border-radius:10px;background:${tagPalette.bg};color:${tagPalette.text};font-size:11px;font-weight:600;`;
+      tag.textContent = lbl;
+      wrap.appendChild(tag);
+    });
+    return wrap;
+  }
+  // Choice / ChoiceList : tags bleus
+  if (kind === 'choice' || kind === 'choiceList') {
+    const values = kind === 'choice'
+      ? (val ? [val] : [])
+      : (Array.isArray(val) ? val.filter(v => v !== 'L') : []);
+    if (!values.length) return null;
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px;padding:2px 0;';
+    values.forEach(v => {
+      const tag = document.createElement('span');
+      tag.style.cssText = 'display:inline-flex;padding:2px 8px;border-radius:10px;background:#e8f0fe;color:#1a73e8;font-size:11px;font-weight:600;';
+      tag.textContent = v;
+      wrap.appendChild(tag);
+    });
+    return wrap;
+  }
+  // Date / DateTime
+  if (kind === 'date' || kind === 'datetime') {
+    if (!val) return null;
+    const span = document.createElement('span');
+    span.style.cssText = 'font-size:13px;color:var(--text);';
+    span.textContent = formatDatePreview(val, kind === 'datetime');
+    return span;
+  }
+  // Pièces jointes
+  if (kind === 'attachment') {
+    const ids = Array.isArray(val) ? val.filter(v => typeof v === 'number' && v > 0) : [];
+    if (!ids.length) return null;
+    const wrap = document.createElement('div');
+    wrap.className = 'attachment-list';
+    ids.forEach((_, i) => {
+      const chip = document.createElement('span');
+      chip.className = 'attachment-chip';
+      chip.innerHTML = `<svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M3 2a1 1 0 011-1h7.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0114 3.414V14a1 1 0 01-1 1H4a1 1 0 01-1-1V2z"/></svg> Fichier ${i+1}`;
+      wrap.appendChild(chip);
+    });
+    return wrap;
+  }
+  // Texte / Nombre / LongText
+  const text = (val !== null && val !== undefined) ? String(val) : '';
+  if (!text) return null;
+  const span = document.createElement('span');
+  span.style.cssText = 'font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.5;';
+  span.textContent = text;
+  return span;
 }
 
 // ══════════════════════════════════════════════
@@ -1116,10 +1317,29 @@ function addOverlay(div, idx) {
       btn.addEventListener('click', e => { e.stopPropagation(); layout[idx].fontSize=opt.s; saveLayout(); renderForm(); });
       tb.appendChild(btn);
     });
-    // Couleur de fond
+    // Style de section : fond / bordure / aucun
+    const style = item.sectionStyle || 'fill';
+    [{l:'Fond',s:'fill'},{l:'Contour',s:'border'},{l:'Aucun',s:'none'}].forEach(opt => {
+      const btn = tbBtn(opt.l, style === opt.s);
+      btn.addEventListener('click', e => { e.stopPropagation(); layout[idx].sectionStyle=opt.s; saveLayout(); renderForm(); });
+      tb.appendChild(btn);
+    });
+    // Couleur DSFR
     const colorBtn = tbBtn('🎨 Couleur', false);
     colorBtn.addEventListener('click', e => { e.stopPropagation(); showColorPicker(idx, colorBtn); });
     tb.appendChild(colorBtn);
+    // Toggle repliable
+    const toggleBtn = tbBtn(item.noToggle ? '▶ Fixe' : '▼ Repliable', false);
+    toggleBtn.addEventListener('click', e => {
+      e.stopPropagation(); layout[idx].noToggle = !item.noToggle; saveLayout(); renderForm();
+    });
+    tb.appendChild(toggleBtn);
+    // Demi-largeur
+    const halfBtn = tbBtn(item.halfWidth ? '↔½' : '↔ Plein', item.halfWidth);
+    halfBtn.addEventListener('click', e => {
+      e.stopPropagation(); layout[idx].halfWidth = !item.halfWidth; saveLayout(); renderForm();
+    });
+    tb.appendChild(halfBtn);
 
   } else if (item.kind === 'desc') {
     tb.classList.add('el-toolbar-right');
@@ -1222,7 +1442,7 @@ function showEmojiPicker(layoutIdx, anchorBtn, currentEmoji) {
   pop.id = 'emoji-picker';
   const rect = anchorBtn.getBoundingClientRect();
   pop.style.cssText = `
-    position:fixed;top:${rect.bottom + 6}px;left:${rect.left}px;z-index:500;
+    position:fixed;top:${rect.bottom + 6}px;left:${safePopLeft(rect, 230)}px;z-index:500;
     background:var(--surface);border:1px solid var(--border);border-radius:8px;
     box-shadow:0 4px 16px rgba(0,0,0,0.14);padding:10px;width:230px;box-sizing:border-box;
   `;
@@ -1292,7 +1512,7 @@ function showEmptyTextPicker(layoutIdx, anchorBtn, currentText) {
   pop.id = OLD_ID;
   const rect = anchorBtn.getBoundingClientRect();
   pop.style.cssText = `
-    position:fixed;top:${rect.bottom + 6}px;left:${rect.left}px;z-index:500;
+    position:fixed;top:${rect.bottom + 6}px;left:${safePopLeft(rect, 240)}px;z-index:500;
     background:var(--surface);border:1px solid var(--border);border-radius:8px;
     box-shadow:0 4px 16px rgba(0,0,0,0.14);padding:10px;width:240px;box-sizing:border-box;
   `;
@@ -1317,11 +1537,21 @@ function showEmptyTextPicker(layoutIdx, anchorBtn, currentText) {
   okBtn.title = 'Valider';
   okBtn.style.cssText = 'flex-shrink:0;padding:5px 10px;border:none;border-radius:4px;background:var(--accent);color:#fff;font-size:13px;cursor:pointer;';
 
-  const save = () => {
-    layout[layoutIdx].emptyText = inp.value.trim();
-    saveLayout(); renderForm(); pop.remove();
+  // Preview live dans le formulaire (mode config)
+  const applyPreview = (text) => {
+    layout[layoutIdx].emptyText = text;
+    // Met à jour seulement le preview du champ concerné sans tout re-rendre
+    const previewEl = el('product-form')
+      .querySelector(`.form-field[data-idx="${layoutIdx}"] [data-preview]`);
+    if (previewEl) previewEl.textContent = text || 'Non renseigné';
   };
 
+  const save = () => {
+    layout[layoutIdx].emptyText = inp.value.trim();
+    saveLayout(); pop.remove();
+  };
+
+  inp.addEventListener('input', () => applyPreview(inp.value.trim() || 'Non renseigné'));
   okBtn.addEventListener('click', e => { e.stopPropagation(); save(); });
   inp.addEventListener('keydown', e => {
     if (e.key === 'Enter') { e.stopPropagation(); save(); }
@@ -1332,7 +1562,7 @@ function showEmptyTextPicker(layoutIdx, anchorBtn, currentText) {
   row.appendChild(okBtn);
   pop.appendChild(row);
 
-  document.addEventListener('click', () => pop.remove(), { once: true });
+  document.addEventListener('click', () => { save(); }, { once: true });
   document.body.appendChild(pop);
 
   // Focus automatique
@@ -1349,7 +1579,7 @@ function showRenamePicker(layoutIdx, anchorBtn, currentLabel) {
   pop.id = OLD_ID;
   const rect = anchorBtn.getBoundingClientRect();
   pop.style.cssText = `
-    position:fixed;top:${rect.bottom + 6}px;left:${rect.left}px;z-index:500;
+    position:fixed;top:${rect.bottom + 6}px;left:${safePopLeft(rect, 260)}px;z-index:500;
     background:var(--surface);border:1px solid var(--border);border-radius:8px;
     box-shadow:0 4px 16px rgba(0,0,0,0.14);padding:10px;width:260px;box-sizing:border-box;
   `;
@@ -1400,7 +1630,7 @@ function showTagColorPicker(layoutIdx, anchorBtn, currentKey) {
   pop.id = 'tag-color-picker';
   const rect = anchorBtn.getBoundingClientRect();
   pop.style.cssText = `
-    position:fixed;top:${rect.bottom + 6}px;left:${rect.left}px;z-index:500;
+    position:fixed;top:${rect.bottom + 6}px;left:${safePopLeft(rect, 186)}px;z-index:500;
     background:var(--surface);border:1px solid var(--border);border-radius:6px;
     box-shadow:0 4px 16px rgba(0,0,0,0.14);padding:8px;
     display:flex;flex-wrap:wrap;gap:6px;width:186px;
@@ -1529,7 +1759,10 @@ function resetLayout() {
 function addItem(kind) {
   const defaults = { title:'Nouvelle section', desc:'Description…', separator:'' };
   const item = { id:newId(), kind, label:defaults[kind]??'', span:kind==='field'?3:undefined };
-  if (kind === 'title') { item.collapsed = false; item.bgColor = null; }
+  if (kind === 'title') {
+    item.collapsed = false; item.bgColor = null;
+    item.sectionStyle = 'fill'; item.noToggle = false; item.halfWidth = false;
+  }
   layout.push(item);
   saveLayout(); renderForm();
 }
@@ -1629,4 +1862,6 @@ function updateRichToolbarState() {
 document.addEventListener('DOMContentLoaded', () => {
   initRichToolbar();
   setupProductSearch();
+  updateTopbarButtons();
+  updateAccessUI();
 });
