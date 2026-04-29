@@ -8,6 +8,7 @@ let pendingChanges    = {};
 let pendingSavedValues = null; // valeurs sauvegardées en attente de confirmation par onRecord
 let editMode          = false;  // mode configuration layout (owners uniquement)
 let dataEditMode      = false;  // mode édition des données (editors+)
+let selectionMode     = 'internal'; // 'internal' | 'linked'
 let userAccess        = null;   // 'owners' | 'editors' | 'viewers' | null
 let tableId           = null;
 
@@ -113,6 +114,7 @@ function updateAccessUI() {
   const btnDataEdit = el('btn-data-edit');
   if (btnEdit)     btnEdit.style.display     = isOwner()  ? '' : 'none';
   if (btnDataEdit) btnDataEdit.style.display = canWrite() ? '' : 'none';
+  updateLinkBtn();
 }
 
 // ── Mode édition des données ──
@@ -143,6 +145,84 @@ function updateTopbarButtons() {
     btnDataEdit.innerHTML = `<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M11.013 1.427a1.75 1.75 0 012.474 0l1.086 1.086a1.75 1.75 0 010 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 01-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 00-.354 0L10.811 3.75l1.439 1.44 1.263-1.263a.25.25 0 000-.354l-1.086-1.086zM11.189 6.25L9.75 4.81l-6.286 6.287a.25.25 0 00-.064.108l-.558 1.953 1.953-.558a.25.25 0 00.108-.065L11.19 6.25z"/></svg> Éditer`;
     btnDataEdit.classList.remove('active');
   }
+}
+
+// ══════════════════════════════════════════════
+// MODE SÉLECTION : interne vs vue liée
+// ══════════════════════════════════════════════
+
+// Charge le mode depuis les options du widget (persisté dans Grist)
+async function loadSelectionMode() {
+  try {
+    const saved = await grist.getOption('selectionMode');
+    if (saved === 'linked' || saved === 'internal') selectionMode = saved;
+  } catch(e) {}
+  syncTopbarZone();
+  updateLinkBtn();
+}
+
+// Bascule entre les deux modes et persiste le choix (owners en mode config uniquement)
+function toggleSelectionMode() {
+  if (!isOwner() || !editMode) return;
+  selectionMode = selectionMode === 'internal' ? 'linked' : 'internal';
+  try { grist.setOption('selectionMode', selectionMode); } catch(e) {}
+  syncTopbarZone();
+  updateLinkBtn();
+  updateEmptyStateMsg();
+}
+
+// Synchronise quelle zone du topbar est visible
+function syncTopbarZone() {
+  const inEdit   = editMode;
+  const isLinked = selectionMode === 'linked';
+  el('topbar-product').style.display      = (!inEdit && !isLinked) ? 'flex' : 'none';
+  el('topbar-linked').style.display       = (!inEdit &&  isLinked) ? 'flex' : 'none';
+  el('topbar-edit-actions').style.display = inEdit ? 'flex' : 'none';
+}
+
+// Met à jour l'apparence du bouton Vue liée / Interne
+function updateLinkBtn() {
+  const btn = el('btn-link-mode');
+  if (!btn) return;
+  const linked = selectionMode === 'linked';
+  btn.style.display = (editMode && isOwner()) ? '' : 'none';
+  if (linked) {
+    btn.innerHTML = `<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M7.775 3.275a.75.75 0 001.06 1.06l1.25-1.25a2 2 0 112.83 2.83l-2.5 2.5a2 2 0 01-2.83 0 .75.75 0 00-1.06 1.06 3.5 3.5 0 004.95 0l2.5-2.5a3.5 3.5 0 00-4.95-4.95l-1.25 1.25zm-4.69 9.64a2 2 0 010-2.83l2.5-2.5a2 2 0 012.83 0 .75.75 0 001.06-1.06 3.5 3.5 0 00-4.95 0l-2.5 2.5a3.5 3.5 0 004.95 4.95l1.25-1.25a.75.75 0 00-1.06-1.06l-1.25 1.25a2 2 0 01-2.83 0z"/></svg> ↩ Interne`;
+    btn.classList.add('linked-active');
+  } else {
+    btn.innerHTML = `<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M7.775 3.275a.75.75 0 001.06 1.06l1.25-1.25a2 2 0 112.83 2.83l-2.5 2.5a2 2 0 01-2.83 0 .75.75 0 00-1.06 1.06 3.5 3.5 0 004.95 0l2.5-2.5a3.5 3.5 0 00-4.95-4.95l-1.25 1.25zm-4.69 9.64a2 2 0 010-2.83l2.5-2.5a2 2 0 012.83 0 .75.75 0 001.06-1.06 3.5 3.5 0 00-4.95 0l-2.5 2.5a3.5 3.5 0 004.95 4.95l1.25-1.25a.75.75 0 00-1.06-1.06l-1.25 1.25a2 2 0 01-2.83 0z"/></svg> Vue liée`;
+    btn.classList.remove('linked-active');
+  }
+}
+
+// Met à jour le nom de l'enregistrement affiché dans la zone Vue liée
+function updateLinkedBadge() {
+  const span = el('linked-record-name');
+  if (!span) return;
+  if (currentRecord) {
+    const p = _productLabels.find(p => p.id === currentRecord.id);
+    span.textContent = p ? p.label : getProductLabel(currentRecord);
+    span.style.fontStyle = 'normal';
+    span.style.color = 'var(--text)';
+  } else {
+    span.textContent = '— sélectionnez une ligne —';
+    span.style.fontStyle = 'italic';
+    span.style.color = 'var(--text-muted)';
+  }
+}
+
+// Adapte le message et l'icône de l'état vide selon le mode
+function updateEmptyStateMsg() {
+  const msg  = el('empty-state-msg');
+  const icoI = el('empty-icon-internal');
+  const icoL = el('empty-icon-linked');
+  if (!msg) return;
+  const linked = selectionMode === 'linked';
+  msg.textContent = linked
+    ? 'Sélectionnez une ligne dans la vue liée'
+    : 'Sélectionnez un produit';
+  if (icoI) icoI.style.display = linked ? 'none' : '';
+  if (icoL) icoL.style.display = linked ? ''     : 'none';
 }
 
 // ══════════════════════════════════════════════
@@ -285,6 +365,7 @@ function getRefRows(refTableId, labelField) {
 grist.ready({ requiredAccess: 'full' });
 loadLayout();
 checkUserAccess();
+loadSelectionMode();
 
 grist.onRecords(async (records) => {
   allRecords = records;
@@ -307,6 +388,16 @@ grist.onRecords(async (records) => {
 });
 
 grist.onRecord((record) => {
+  // En mode vue liée, Grist peut envoyer null quand aucune ligne n'est sélectionnée
+  if (!record || !record.id) {
+    currentRecord = null;
+    el('product-form').style.display = 'none';
+    updateEmptyStateMsg();
+    show('empty-state');
+    if (selectionMode === 'linked') updateLinkedBadge();
+    return;
+  }
+
   if (hasPendingChanges() && !confirm('Des modifications non enregistrées seront perdues. Continuer ?')) return;
   const prev = currentRecord;
   // Si la ligne change, les valeurs sauvegardées ne s'appliquent plus
@@ -339,9 +430,13 @@ grist.onRecord((record) => {
   pendingChanges = {};
   updateSaveButtons();
   renderForm();
-  // Met à jour l'input de recherche produit
-  const _p = _productLabels.find(p => p.id === record.id);
-  el('product-search-input').value = _p ? _p.label : getProductLabel(record);
+  // Met à jour l'input ou le badge selon le mode
+  if (selectionMode === 'linked') {
+    updateLinkedBadge();
+  } else {
+    const _p = _productLabels.find(p => p.id === record.id);
+    el('product-search-input').value = _p ? _p.label : getProductLabel(record);
+  }
 });
 
 // ══════════════════════════════════════════════
@@ -466,9 +561,9 @@ function toggleEditMode() {
   el('product-form').classList.toggle('edit-mode', editMode);
   el('edit-banner').classList.toggle('visible', editMode);
 
-  // Topbar : swap produit ↔ actions configuration
-  el('topbar-product').style.display = editMode ? 'none' : 'flex';
-  el('topbar-edit-actions').style.display = editMode ? 'flex' : 'none';
+  // Topbar : zones produit/liée/config + bouton vue liée
+  syncTopbarZone();
+  updateLinkBtn();
 
   // Bouton : "Configurer" ↔ "Sauvegarder" (vert)
   const btn = el('btn-edit');
