@@ -10,6 +10,8 @@ let editMode          = false;  // mode configuration layout (owners uniquement)
 let dataEditMode      = false;  // mode édition des données (editors+)
 let selectionMode     = 'internal'; // 'internal' | 'linked'
 let userAccess        = null;   // 'owners' | 'editors' | 'viewers' | null
+let canWriteTable     = false;  // accès en écriture à la table courante (vérifié via ACL Grist)
+let tableWriteChecked = null;   // tableId pour laquelle l'accès a déjà été testé
 let tableId           = null;
 
 // Données des tables référencées : { tableId: { columns: [], rows: [{id, ...fields}] } }
@@ -109,11 +111,28 @@ async function checkUserAccess() {
   updateAccessUI();
 }
 
+// Teste l'accès en écriture sur la table via un UpdateRecord à champs vides.
+// C'est un no-op (rien n'est modifié) mais les règles ACL avancées de Grist sont
+// vérifiées, ce qui permet de détecter si l'utilisateur peut écrire dans cette table.
+async function checkTableWriteAccess() {
+  if (!tableId || allRecords.length === 0) return;
+  if (tableWriteChecked === tableId) return; // déjà vérifié pour cette table
+  tableWriteChecked = tableId;
+  try {
+    await grist.docApi.applyUserActions([['UpdateRecord', tableId, allRecords[0].id, {}]]);
+    canWriteTable = true;
+  } catch(e) {
+    canWriteTable = false;
+  }
+  updateAccessUI();
+  updateTopbarButtons();
+}
+
 function updateAccessUI() {
   const btnEdit     = el('btn-edit');
   const btnDataEdit = el('btn-data-edit');
-  if (btnEdit)     btnEdit.style.display     = isOwner()  ? '' : 'none';
-  if (btnDataEdit) btnDataEdit.style.display = canWrite() ? '' : 'none';
+  if (btnEdit)     btnEdit.style.display     = isOwner()      ? '' : 'none';
+  if (btnDataEdit) btnDataEdit.style.display = canWriteTable  ? '' : 'none';
   updateLinkBtn();
 }
 
@@ -137,7 +156,7 @@ function updateTopbarButtons() {
     btnDataEdit.style.display = 'none';
     return;
   }
-  btnDataEdit.style.display = canWrite() ? '' : 'none';
+  btnDataEdit.style.display = canWriteTable ? '' : 'none';
   if (dataEditMode) {
     btnDataEdit.innerHTML = `<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg> Enregistrer`;
     btnDataEdit.classList.add('active');
@@ -383,6 +402,8 @@ grist.onRecords(async (records) => {
     if (tableId) loadColumnMeta();
   }
   populateSelect();
+  // Vérifier l'accès en écriture dès qu'on a la table et au moins un enregistrement
+  if (tableId && records.length > 0) checkTableWriteAccess();
   hide('loading');
   if (!currentRecord) show('empty-state');
 });
