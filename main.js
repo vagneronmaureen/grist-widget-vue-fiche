@@ -296,6 +296,10 @@ async function loadColumnMeta() {
       const col   = allColumns.find(c => c.id === colId);
       if (!col) return;
 
+      // Marquer les colonnes formule : non modifiables dans le widget
+      col.isFormula = !!(colMeta.isFormula && colMeta.isFormula[i]) ||
+                      !!(colMeta.formula   && colMeta.formula[i] && colMeta.formula[i].trim());
+
       const type = colMeta.type[i] || '';
       col.gristType = type;
 
@@ -400,16 +404,29 @@ grist.onRecords(async (records) => {
   allRecords = records;
   if (!tableId) { try { tableId = await grist.getSelectedTableId(); } catch(e) {} }
 
-  if (records.length > 0 && allColumns.length === 0) {
-    const sample = records[0];
-    allColumns = Object.keys(sample)
-      .filter(k => k !== 'id' && !k.startsWith('_'))
-      .map(k => ({ id: k, label: k.replace(/_/g,' '), kind: guessKind(sample[k]) }));
-    if (layout.length === 0) {
-      layout = allColumns.map(c => ({ id: newId(), kind: 'field', colId: c.id, label: c.label, span: 3 }));
-      saveLayout();
+  if (records.length > 0) {
+    const sample  = records[0];
+    const newKeys = Object.keys(sample).filter(k => k !== 'id' && !k.startsWith('_'));
+    const oldIds  = new Set(allColumns.map(c => c.id));
+    // Détecter tout changement de structure (ajout, suppression ou renommage de colonne)
+    const structureChanged = allColumns.length === 0
+      || newKeys.length !== allColumns.length
+      || newKeys.some(k => !oldIds.has(k));
+
+    if (structureChanged) {
+      // Reconstruire allColumns en préservant les métadonnées des colonnes qui existent encore
+      allColumns = newKeys.map(k => {
+        const existing = allColumns.find(c => c.id === k);
+        return existing || { id: k, label: k.replace(/_/g,' '), kind: guessKind(sample[k]) };
+      });
+      if (layout.length === 0) {
+        layout = allColumns.map(c => ({ id: newId(), kind: 'field', colId: c.id, label: c.label, span: 3 }));
+        saveLayout();
+      }
+      if (tableId) loadColumnMeta();
+      // Réinitialiser le cache de vérification d'accès si la table a changé de structure
+      tableWriteChecked = null;
     }
-    if (tableId) loadColumnMeta();
   }
   populateSelect();
   // Vérifier l'accès en écriture dès qu'on a la table et au moins un enregistrement
@@ -801,6 +818,7 @@ function renderForm() {
       if (usedCols + span > 6) flushGrid();
 
       const cell = buildFieldCell(item, idx);
+      if (!cell) { isFirst = false; continue; } // colonne introuvable en mode vue : on saute
       cell.classList.add(`span-${span}`);
       getGrid().appendChild(cell);
       usedCols += span;
@@ -895,7 +913,24 @@ function makeEl(tag, cls, idx) {
 // CELLULE CHAMP
 // ══════════════════════════════════════════════
 function buildFieldCell(item, idx) {
-  const col    = allColumns.find(c => c.id === item.colId) || { id: item.colId, label: item.colId, kind: 'text' };
+  const col = allColumns.find(c => c.id === item.colId);
+
+  // ── Colonne introuvable (renommée ou supprimée dans Grist) ──────────────
+  if (!col) {
+    if (!editMode) return null; // invisible en mode vue/édition données
+    const cell = document.createElement('div');
+    cell.className = 'form-field draggable-el';
+    cell.dataset.idx = idx;
+    setupDragEvents(cell, idx);
+    const warn = document.createElement('div');
+    warn.style.cssText = 'font-size:11px;color:var(--danger);padding:4px 0;display:flex;align-items:center;gap:6px;';
+    warn.innerHTML = `<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 110 14A7 7 0 018 1zm0 1.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM8 6a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 018 6zm0-2.5a1 1 0 110 2 1 1 0 010-2z"/></svg>
+      Colonne <strong>${item.colId}</strong> introuvable dans Grist`;
+    cell.appendChild(warn);
+    addOverlay(cell, idx);
+    return cell;
+  }
+
   const rawVal = currentRecord ? currentRecord[item.colId] : '';
   const val    = pendingChanges.hasOwnProperty(item.colId) ? pendingChanges[item.colId]
                  : (rawVal !== null && rawVal !== undefined ? rawVal : '');
@@ -956,6 +991,27 @@ function buildFieldCell(item, idx) {
       const displayEl = buildFieldDisplay(item, col, val, kind);
       if (displayEl) cell.appendChild(displayEl);
     }
+    return cell;
+  }
+
+  // Champ formule : lecture seule même en mode édition données
+  if (col.isFormula) {
+    const formulaWrap = document.createElement('div');
+    formulaWrap.style.cssText = 'display:flex;align-items:baseline;gap:6px;';
+    const displayEl = buildFieldDisplay(item, col, val, kind);
+    if (displayEl) formulaWrap.appendChild(displayEl);
+    else {
+      const t = document.createElement('span');
+      t.style.cssText = 'font-size:13px;color:var(--text-muted);font-style:italic;';
+      t.textContent = emptyText;
+      formulaWrap.appendChild(t);
+    }
+    const badge = document.createElement('span');
+    badge.title = 'Champ calculé automatiquement — non modifiable';
+    badge.style.cssText = 'font-size:9px;font-weight:700;letter-spacing:.04em;color:var(--text-muted);background:var(--bg);border:1px solid var(--border);border-radius:3px;padding:1px 4px;white-space:nowrap;flex-shrink:0;';
+    badge.textContent = 'FORMULE';
+    formulaWrap.appendChild(badge);
+    cell.appendChild(formulaWrap);
     return cell;
   }
 
