@@ -9,7 +9,8 @@ let pendingSavedValues = null; // valeurs sauvegardées en attente de confirmati
 let editMode          = false;  // mode configuration layout (owners uniquement)
 let dataEditMode      = false;  // mode édition des données (editors+)
 let selectionMode     = 'internal'; // 'internal' | 'linked'
-let userAccess        = null;   // 'owners' | 'editors' | 'viewers' | null
+let userAccess        = null;   // 'owners' | 'editors' | 'viewers' | null | 'unchecked'
+// 'unchecked' = vérification en cours, boutons masqués par défaut
 let canWriteTable     = false;  // accès en écriture à la table courante (vérifié via ACL Grist)
 let tableWriteChecked = null;   // tableId pour laquelle l'accès a déjà été testé
 let tableId           = null;
@@ -100,14 +101,21 @@ async function loadLayout() {
 // ══════════════════════════════════════════════
 // ACCÈS UTILISATEUR
 // ══════════════════════════════════════════════
-function isOwner()  { return !userAccess || userAccess === 'owners'; }
+// 'unchecked' → vérification en cours, on masque par défaut
+// null → API indisponible (hors Grist / dev) → on laisse tout visible
+function isOwner()  { return userAccess === null || userAccess === 'owners'; }
 function canWrite() { return isOwner() || userAccess === 'editors'; }
 
 async function checkUserAccess() {
+  userAccess = 'unchecked'; // masque les boutons pendant la vérification
+  updateAccessUI();
   try {
     const session = await grist.getUserSession();
+    // session.access : 'owners' | 'editors' | 'viewers' | undefined
     userAccess = session ? (session.access || null) : null;
-  } catch(e) { userAccess = null; }
+  } catch(e) {
+    userAccess = null; // API indisponible → mode dev, tout visible
+  }
   updateAccessUI();
 }
 
@@ -138,6 +146,7 @@ function updateAccessUI() {
 
 // ── Mode édition des données ──
 function toggleDataEditMode() {
+  if (!canWriteTable) return; // droits insuffisants
   if (dataEditMode) {
     if (hasPendingChanges() && !confirm('Des modifications non enregistrées seront perdues. Continuer ?')) return;
     dataEditMode = false;
@@ -145,6 +154,7 @@ function toggleDataEditMode() {
   } else {
     dataEditMode = true;
   }
+  updateSaveButtons();
   updateTopbarButtons();
   renderForm();
 }
@@ -555,23 +565,57 @@ function setupProductSearch() {
 function hasPendingChanges() { return Object.keys(pendingChanges).length > 0; }
 function markDirty(colId, value) { pendingChanges[colId] = value; if (pendingSavedValues) delete pendingSavedValues[colId]; updateSaveButtons(); }
 function updateSaveButtons() {
-  const d = hasPendingChanges() && dataEditMode;
-  el('btn-save').classList.toggle('visible', d);
-  el('btn-discard').classList.toggle('visible', d);
+  // Les boutons Annuler / Enregistrer ne s'affichent que si :
+  // - on est en mode édition données
+  // - il y a des changements en attente
+  // - l'utilisateur a les droits d'écriture sur la table
+  const show = hasPendingChanges() && dataEditMode && canWriteTable;
+  el('btn-save').classList.toggle('visible', show);
+  el('btn-discard').classList.toggle('visible', show);
+
+  // Quand Annuler/Enregistrer sont visibles, masquer btn-data-edit pour éviter le doublon
+  const btnDataEdit = el('btn-data-edit');
+  if (btnDataEdit && dataEditMode && !editMode) {
+    btnDataEdit.style.display = show ? 'none' : (canWriteTable ? '' : 'none');
+  }
 }
+
 async function saveChanges() {
-  if (!currentRecord || !tableId || !hasPendingChanges()) return;
+  if (!currentRecord || !tableId || !hasPendingChanges() || !canWriteTable) return;
   const toSave = { ...pendingChanges };
   pendingSavedValues = { ...pendingSavedValues, ...toSave };
-  pendingChanges = {}; updateSaveButtons();
+  pendingChanges = {};
   try {
     await grist.docApi.applyUserActions([['UpdateRecord', tableId, currentRecord.id, toSave]]);
     Object.assign(currentRecord, toSave);
+    // Sauvegarde réussie → sortir du mode édition
+    dataEditMode = false;
+    updateSaveButtons();
+    updateTopbarButtons();
     renderForm();
     showToast('✓ Modifications enregistrées');
-  } catch(e) { pendingSavedValues = null; pendingChanges = toSave; updateSaveButtons(); showToast('Erreur : '+e.message, 4000); }
+  } catch(e) {
+    pendingSavedValues = null;
+    pendingChanges = toSave;
+    updateSaveButtons();
+    showToast('Erreur : ' + e.message, 4000);
+  }
 }
-function discardChanges() { pendingChanges = {}; updateSaveButtons(); renderForm(); }
+
+function discardChanges() {
+  pendingChanges = {};
+  // Annuler → sortir du mode édition également
+  dataEditMode = false;
+  updateSaveButtons();
+  updateTopbarButtons();
+  renderForm();
+}
+
+// Garde : empêche d'entrer en mode édition sans les droits
+function toggleDataEditModeGuard() {
+  if (!canWriteTable) return;
+  toggleDataEditMode();
+}
 
 // ══════════════════════════════════════════════
 // MODE CONFIGURATION
