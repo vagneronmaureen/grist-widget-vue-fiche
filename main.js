@@ -296,6 +296,9 @@ async function loadColumnMeta() {
       const col   = allColumns.find(c => c.id === colId);
       if (!col) return;
 
+      // Colonne formule pure (isFormula = true) → non modifiable dans le widget
+      col.isFormula = !!(colMeta.isFormula && colMeta.isFormula[i]);
+
       const type = colMeta.type[i] || '';
       col.gristType = type;
 
@@ -956,6 +959,25 @@ function buildFieldCell(item, idx) {
       const displayEl = buildFieldDisplay(item, col, val, kind);
       if (displayEl) cell.appendChild(displayEl);
     }
+    return cell;
+  }
+
+  // Champ formule pure : non modifiable en mode édition données
+  if (col.isFormula) {
+    if (isEmpty) {
+      const emptySpan = document.createElement('span');
+      emptySpan.className = 'field-empty-display';
+      emptySpan.textContent = emptyText;
+      cell.appendChild(emptySpan);
+    } else {
+      const displayEl = buildFieldDisplay(item, col, val, kind);
+      if (displayEl) cell.appendChild(displayEl);
+    }
+    const badge = document.createElement('span');
+    badge.textContent = 'FORMULE';
+    badge.title = 'Ce champ est calculé automatiquement et ne peut pas être modifié';
+    badge.style.cssText = 'font-size:10px;font-weight:600;letter-spacing:.05em;color:var(--text-muted);background:var(--surface-alt,#f0f0f0);border:1px solid var(--border);border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:middle;float:right;';
+    label.appendChild(badge);
     return cell;
   }
 
