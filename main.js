@@ -818,7 +818,7 @@ function renderForm() {
       if (usedCols + span > 6) flushGrid();
 
       const cell = buildFieldCell(item, idx);
-      if (!cell) { isFirst = false; continue; } // colonne introuvable en mode vue : on saute
+      if (!cell) { isFirst = false; return; } // colonne introuvable en mode vue : on saute
       cell.classList.add(`span-${span}`);
       getGrid().appendChild(cell);
       usedCols += span;
