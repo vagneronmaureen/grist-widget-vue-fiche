@@ -1011,9 +1011,12 @@ function formatValPreview(val, col, labelField) {
 function formatDatePreview(val, withTime) {
   if (!val) return 'Non renseigné';
   try {
-    const ms = withTime ? val * 1000 : val * 86400000;
+    // Grist stocke Date ET DateTime en secondes Unix (pas en jours)
+    const ms = val * 1000;
     const d = new Date(ms);
-    return withTime ? d.toLocaleString('fr-FR') : d.toLocaleDateString('fr-FR');
+    if (isNaN(d.getTime())) return String(val);
+    // Pour les dates seules, forcer l'affichage UTC pour éviter le décalage timezone
+    return withTime ? d.toLocaleString('fr-FR') : d.toLocaleDateString('fr-FR', { timeZone: 'UTC' });
   } catch(e) { return String(val); }
 }
 
@@ -1146,14 +1149,18 @@ function buildDate(col, val, withTime, emptyText = 'Non renseigné') {
 
   if (val && typeof val === 'number') {
     try {
-      const ms = withTime ? val * 1000 : val * 86400000;
+      // Grist stocke Date ET DateTime en secondes Unix (pas en jours)
+      const ms = val * 1000;
       const d = new Date(ms);
-      if (withTime) {
-        // datetime-local needs "YYYY-MM-DDTHH:MM"
-        const pad = n => String(n).padStart(2,'0');
-        inp.value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-      } else {
-        inp.value = d.toISOString().split('T')[0];
+      if (!isNaN(d.getTime())) {
+        if (withTime) {
+          // datetime-local needs "YYYY-MM-DDTHH:MM" (heure locale)
+          const pad = n => String(n).padStart(2,'0');
+          inp.value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        } else {
+          // Date seule : afficher en UTC pour éviter le décalage timezone
+          inp.value = d.toISOString().split('T')[0];
+        }
       }
     } catch(e) {}
   }
@@ -1161,9 +1168,9 @@ function buildDate(col, val, withTime, emptyText = 'Non renseigné') {
   inp.addEventListener('change', () => {
     if (!inp.value) { markDirty(col.id, null); return; }
     const d = new Date(inp.value);
-    if (isNaN(d)) { markDirty(col.id, null); return; }
-    // Grist stocke Date en jours depuis epoch, DateTime en secondes
-    markDirty(col.id, withTime ? Math.round(d.getTime() / 1000) : Math.round(d.getTime() / 86400000));
+    if (isNaN(d.getTime())) { markDirty(col.id, null); return; }
+    // Grist stocke Date ET DateTime en secondes Unix
+    markDirty(col.id, Math.round(d.getTime() / 1000));
   });
   return inp;
 }
