@@ -1008,14 +1008,30 @@ function formatValPreview(val, col, labelField) {
   return String(val);
 }
 
+/**
+ * Convertit une valeur date Grist en millisecondes JS.
+ * Grist peut stocker les dates en secondes, en jours ou (par bug) en ms.
+ * On auto-détecte l'unité selon l'ordre de grandeur :
+ *   < 100 000          → jours depuis epoch  (× 86 400 000)
+ *   < 2 × 10^10        → secondes Unix       (× 1 000)
+ *   ≥ 2 × 10^10        → millisecondes JS    (valeur brute)
+ */
+function gristDateToMs(val) {
+  if (!val || typeof val !== 'number') return null;
+  const abs = Math.abs(val);
+  if (abs < 100000)   return val * 86400000; // jours
+  if (abs < 2e10)     return val * 1000;     // secondes (format natif Grist)
+  return val;                                 // ms (bug d'ancien save)
+}
+
 function formatDatePreview(val, withTime) {
   if (!val) return 'Non renseigné';
   try {
-    // Grist stocke Date ET DateTime en secondes Unix (pas en jours)
-    const ms = val * 1000;
+    const ms = gristDateToMs(val);
+    if (ms === null) return String(val);
     const d = new Date(ms);
     if (isNaN(d.getTime())) return String(val);
-    // Pour les dates seules, forcer l'affichage UTC pour éviter le décalage timezone
+    // Pour les dates seules, forcer UTC pour éviter le décalage timezone
     return withTime ? d.toLocaleString('fr-FR') : d.toLocaleDateString('fr-FR', { timeZone: 'UTC' });
   } catch(e) { return String(val); }
 }
@@ -1149,17 +1165,18 @@ function buildDate(col, val, withTime, emptyText = 'Non renseigné') {
 
   if (val && typeof val === 'number') {
     try {
-      // Grist stocke Date ET DateTime en secondes Unix (pas en jours)
-      const ms = val * 1000;
-      const d = new Date(ms);
-      if (!isNaN(d.getTime())) {
-        if (withTime) {
-          // datetime-local needs "YYYY-MM-DDTHH:MM" (heure locale)
-          const pad = n => String(n).padStart(2,'0');
-          inp.value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-        } else {
-          // Date seule : afficher en UTC pour éviter le décalage timezone
-          inp.value = d.toISOString().split('T')[0];
+      const ms = gristDateToMs(val);
+      if (ms !== null) {
+        const d = new Date(ms);
+        if (!isNaN(d.getTime())) {
+          if (withTime) {
+            // datetime-local attend "YYYY-MM-DDTHH:MM" en heure locale
+            const pad = n => String(n).padStart(2,'0');
+            inp.value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+          } else {
+            // Date seule : toISOString() donne toujours la date UTC
+            inp.value = d.toISOString().split('T')[0];
+          }
         }
       }
     } catch(e) {}
@@ -1169,7 +1186,7 @@ function buildDate(col, val, withTime, emptyText = 'Non renseigné') {
     if (!inp.value) { markDirty(col.id, null); return; }
     const d = new Date(inp.value);
     if (isNaN(d.getTime())) { markDirty(col.id, null); return; }
-    // Grist stocke Date ET DateTime en secondes Unix
+    // Toujours sauvegarder en secondes Unix (format natif Grist)
     markDirty(col.id, Math.round(d.getTime() / 1000));
   });
   return inp;
