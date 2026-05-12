@@ -501,7 +501,9 @@ function setupProductSearch() {
   const renderDropdown = (query) => {
     dropdown.innerHTML = '';
     const q = (query || '').toLowerCase();
-    const items = _productLabels.filter(p => !q || p.label.toLowerCase().includes(q));
+    const items = _productLabels
+      .filter(p => !q || p.label.toLowerCase().includes(q))
+      .sort((a, b) => a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' }));
 
     if (!items.length) {
       const empty = document.createElement('div');
