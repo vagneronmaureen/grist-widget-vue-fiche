@@ -162,6 +162,35 @@
   .form-field-label {
     font-size: 11px; font-weight: 700; color: var(--text-label);
     text-transform: uppercase; letter-spacing: 0.07em; user-select: none;
+    display: flex; align-items: center; gap: 5px;
+  }
+  /* Icône ⓘ description de champ */
+  .field-info-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    color: #fff;
+    font-size: 9px; font-weight: 700; font-style: normal;
+    line-height: 1; letter-spacing: 0;
+    cursor: default;
+    text-transform: none;
+    transition: background 0.15s;
+    position: relative;
+  }
+  .field-info-btn:hover { background: var(--accent); }
+  /* Tooltip */
+  #field-info-tooltip {
+    position: fixed; z-index: 600;
+    background: #2b2b2b; color: #fff;
+    font-size: 12px; font-weight: 400; letter-spacing: 0;
+    text-transform: none;
+    padding: 7px 10px; border-radius: 6px;
+    max-width: 260px; line-height: 1.5;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+    pointer-events: none;
+    white-space: pre-wrap;
   }
   .form-field-input,
   .form-field-textarea {
