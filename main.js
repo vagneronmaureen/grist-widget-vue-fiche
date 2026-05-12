@@ -290,6 +290,9 @@ async function loadColumnMeta() {
     tblMeta.id.forEach((id, i) => { tableRefToId[id] = tblMeta.tableId[i]; });
     const myTableRef = tblMeta.id[tblMeta.tableId.indexOf(tableId)];
 
+    // Debug : clés disponibles dans _grist_Tables_column
+    console.log('[Widget] _grist_Tables_column keys:', Object.keys(colMeta));
+
     colMeta.id.forEach((_, i) => {
       if (colMeta.parentId[i] !== myTableRef) return;
       const colId = colMeta.colId[i];
@@ -300,7 +303,10 @@ async function loadColumnMeta() {
       col.isFormula = !!(colMeta.isFormula && colMeta.isFormula[i]);
 
       // Description de la colonne (renseignée dans Grist)
-      col.description = (colMeta.description && colMeta.description[i]) ? colMeta.description[i].trim() : '';
+      // Le champ peut s'appeler 'description' ou ne pas être retourné si vide
+      const rawDesc = colMeta.description ? colMeta.description[i] : undefined;
+      col.description = (rawDesc && typeof rawDesc === 'string') ? rawDesc.trim() : '';
+      if (col.description) console.log(`[Widget] description colonne "${colId}":`, col.description);
 
       const type = colMeta.type[i] || '';
       col.gristType = type;
@@ -504,9 +510,17 @@ function setupProductSearch() {
   const renderDropdown = (query) => {
     dropdown.innerHTML = '';
     const q = (query || '').toLowerCase();
-    const items = _productLabels
-      .filter(p => !q || p.label.toLowerCase().includes(q))
-      .sort((a, b) => a.label.localeCompare(b.label, 'fr', { sensitivity: 'base' }));
+    const locale = { sensitivity: 'base' };
+    const cmp = (a, b) => a.label.localeCompare(b.label, 'fr', locale);
+    let items;
+    if (!q) {
+      items = [..._productLabels].sort(cmp);
+    } else {
+      // Groupe 1 : commence par la recherche — Groupe 2 : contient la recherche ailleurs
+      const starts   = _productLabels.filter(p =>  p.label.toLowerCase().startsWith(q)).sort(cmp);
+      const contains = _productLabels.filter(p => !p.label.toLowerCase().startsWith(q) && p.label.toLowerCase().includes(q)).sort(cmp);
+      items = [...starts, ...contains];
+    }
 
     if (!items.length) {
       const empty = document.createElement('div');
