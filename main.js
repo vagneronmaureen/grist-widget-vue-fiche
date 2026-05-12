@@ -299,6 +299,9 @@ async function loadColumnMeta() {
       // Colonne formule pure (isFormula = true) → non modifiable dans le widget
       col.isFormula = !!(colMeta.isFormula && colMeta.isFormula[i]);
 
+      // Description de la colonne (renseignée dans Grist)
+      col.description = (colMeta.description && colMeta.description[i]) ? colMeta.description[i].trim() : '';
+
       const type = colMeta.type[i] || '';
       col.gristType = type;
 
@@ -932,6 +935,31 @@ function buildFieldCell(item, idx) {
     label.appendChild(ico);
   }
   label.appendChild(document.createTextNode(item.label || col.label || item.colId));
+
+  // Icône ⓘ si la colonne a une description renseignée dans Grist
+  if (col.description) {
+    const infoBtn = document.createElement('i');
+    infoBtn.className = 'field-info-btn';
+    infoBtn.textContent = 'i';
+    infoBtn.setAttribute('aria-label', col.description);
+    const desc = col.description;
+    infoBtn.addEventListener('mouseenter', () => {
+      let tip = document.getElementById('field-info-tooltip');
+      if (!tip) { tip = document.createElement('div'); tip.id = 'field-info-tooltip'; document.body.appendChild(tip); }
+      tip.textContent = desc;
+      tip.style.display = 'block';
+      const r = infoBtn.getBoundingClientRect();
+      const tipW = 260;
+      tip.style.left = Math.min(r.left, window.innerWidth - tipW - 8) + 'px';
+      tip.style.top  = (r.bottom + 6) + 'px';
+    });
+    infoBtn.addEventListener('mouseleave', () => {
+      const tip = document.getElementById('field-info-tooltip');
+      if (tip) tip.style.display = 'none';
+    });
+    label.appendChild(infoBtn);
+  }
+
   cell.appendChild(label);
 
   const emptyText = item.emptyText || 'Non renseigné';
