@@ -165,32 +165,15 @@ async function checkUserAccess() {
       if (restAccess) {
         userAccess = restAccess;
       } else {
-        // Fallback 2 : lire _grist_ACLResources (plus restrictif que _grist_ACLRules
-        // sur certaines instances). Si indisponible, tenter _grist_Tables pour distinguer
-        // éditeur de viewer.
-        // NOTE : ne JAMAIS écrire dans les tables ACL (_grist_ACLRules etc.) ici —
-        // cela déclenche une rechargement global du document sur tous les clients (boucle infinie).
-        let aclReadOk = false;
+        // Fallback 2 : lecture _grist_ACLRules (lecture seule, sans effet de bord).
+        // Sur cette instance Grist, la table est accessible → userAccess = 'owners'.
         try {
-          await grist.docApi.fetchTable('_grist_ACLResources');
-          aclReadOk = true;
-        } catch(e) { /* non disponible ou refusé */ }
-
-        if (aclReadOk) {
-          // Si on peut lire _grist_ACLResources, tenter aussi _grist_ACLPrincipals
-          // (sur certaines instances, seuls les owners ont accès à ces tables)
+          await grist.docApi.fetchTable('_grist_ACLRules');
           userAccess = 'owners';
-          console.log('[Widget] ACL resource probe → owners (fallback, vérifier avec REST)');
-        } else {
-          // Ne peut pas lire les tables ACL → pas propriétaire
-          try {
-            await grist.docApi.fetchTable('_grist_Tables');
-            userAccess = 'editors';
-          } catch(eRead) {
-            userAccess = 'viewers';
-          }
-          console.log('[Widget] ACL resource probe → non-owner, userAccess =', userAccess);
+        } catch(e) {
+          userAccess = 'editors';
         }
+        console.log('[Widget] fallback _grist_ACLRules → userAccess =', userAccess);
       }
     }
   } catch(e) {
@@ -199,39 +182,24 @@ async function checkUserAccess() {
   }
   console.log('[Widget] userAccess =', userAccess, '| isOwner() =', isOwner());
   updateAccessUI();
+  // Relancer checkTableWriteAccess maintenant que userAccess est connu —
+  // un appel anticipé depuis onRecords (pendant 'unchecked') a pu être ignoré.
+  checkTableWriteAccess();
 }
 
 // Détermine l'accès en écriture sur la table.
-// - Propriétaires : accès garanti, pas besoin de sonde (évite le toast Grist)
-// - Viewers      : accès impossible, pas besoin de sonde
-// - Éditeurs     : sonde via UpdateRecord vide (peut déclencher un toast Grist si bloqué
-//                  par des règles ACL spécifiques à la table — comportement Grist attendu)
-async function checkTableWriteAccess() {
+// On se base uniquement sur le niveau d'accès au document (owners/editors/viewers).
+// On n'utilise PAS applyUserActions : même un UpdateRecord vide peut déclencher
+// des notifications Grist qui provoquent des boucles onRecords.
+function checkTableWriteAccess() {
   if (!tableId || allRecords.length === 0) return;
+  // Si checkUserAccess() n'a pas encore terminé, on attend — sans poser le verrou,
+  // pour pouvoir relancer une fois userAccess connu (voir fin de checkUserAccess).
+  if (userAccess === 'unchecked') return;
   if (tableWriteChecked === tableId) return; // déjà vérifié pour cette table
   tableWriteChecked = tableId;
-
-  if (isOwner()) {
-    // Propriétaires : accès en écriture toujours garanti dans Grist
-    canWriteTable = true;
-    updateAccessUI();
-    updateTopbarButtons();
-    return;
-  }
-  if (userAccess === 'viewers') {
-    // Viewers : aucune écriture possible
-    canWriteTable = false;
-    updateAccessUI();
-    updateTopbarButtons();
-    return;
-  }
-  // Éditeurs : vérification fine via ACL table (UpdateRecord no-op)
-  try {
-    await grist.docApi.applyUserActions([['UpdateRecord', tableId, allRecords[0].id, {}]]);
-    canWriteTable = true;
-  } catch(e) {
-    canWriteTable = false;
-  }
+  // owners et editors peuvent écrire ; viewers non
+  canWriteTable = canWrite();
   updateAccessUI();
   updateTopbarButtons();
 }
