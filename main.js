@@ -166,16 +166,16 @@ async function checkUserAccess() {
         userAccess = restAccess;
       } else {
         // Fallback 2 : sonde ACL — lecture d'une table protégée par règle ACL.
-        // Créer dans Grist une table "_OwnerAccess" (1 ligne) avec la règle :
+        // Créer dans Grist une table "OwnerAccess" (1 ligne) avec la règle :
         //   Condition : user.access != "owners"  →  Deny Read
         // Ainsi fetchTable réussit pour les owners et échoue pour les éditeurs/viewers.
         // Aucun write, aucune entrée dans le journal d'actions, pas de boucle de rechargement.
         try {
-          await grist.docApi.fetchTable('_OwnerAccess');
+          await grist.docApi.fetchTable('OwnerAccess');
           userAccess = 'owners';
-          console.log('[Widget] _OwnerAccess probe → owners');
+          console.log('[Widget] OwnerAccess probe → owners');
         } catch(e) {
-          console.log('[Widget] _OwnerAccess probe — erreur fetchTable:', e && (e.message || String(e)));
+          console.log('[Widget] OwnerAccess probe — erreur fetchTable:', e && (e.message || String(e)));
           // Lecture refusée → pas propriétaire
           // Distinguer éditeur (peut lire _grist_ACLRules) de viewer (ne peut pas)
           try {
@@ -184,7 +184,7 @@ async function checkUserAccess() {
           } catch(e2) {
             userAccess = 'viewers';
           }
-          console.log('[Widget] _OwnerAccess probe → non-owner, userAccess =', userAccess);
+          console.log('[Widget] OwnerAccess probe → non-owner, userAccess =', userAccess);
         }
       }
     }
