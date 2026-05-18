@@ -106,26 +106,118 @@ async function loadLayout() {
 function isOwner()  { return userAccess === null || userAccess === 'owners'; }
 function canWrite() { return isOwner() || userAccess === 'editors'; }
 
+// Récupère le niveau d'accès de l'utilisateur courant via l'API REST Grist.
+// GET /api/docs/{docId} retourne { access: 'owners'|'editors'|'viewers' }
+// Fonctionne en same-origin grâce aux cookies de session, sans effet de bord, sans toast.
+async function fetchDocAccessViaRest() {
+  // Logs détaillés pour diagnostiquer les problèmes
+  const referrer = document.referrer || '';
+  const selfHref = window.location.href || '';
+  console.log('[Widget] REST probe — document.referrer:', referrer || '(vide)');
+  console.log('[Widget] REST probe — window.location.href:', selfHref);
+
+  // Cherche le docId dans le referrer ET dans window.location
+  let docId = null;
+  const sources = [referrer, selfHref];
+  for (const src of sources) {
+    if (!src) continue;
+    // Format typique : /o/{org}/{docId}/p/{page} ou /o/{org}/{docId}/
+    let m = src.match(/\/o\/[^/]+\/([a-zA-Z0-9_-]{6,})\//);
+    if (m) { docId = m[1]; console.log('[Widget] REST probe — docId trouvé (format /o/) dans:', src); break; }
+    // Format alternatif : /doc/{docId}
+    m = src.match(/\/doc\/([a-zA-Z0-9_-]{6,})/);
+    if (m) { docId = m[1]; console.log('[Widget] REST probe — docId trouvé (format /doc/) dans:', src); break; }
+  }
+
+  if (!docId) {
+    console.log('[Widget] REST probe — docId introuvable dans referrer ou href, abandon');
+    return null;
+  }
+
+  try {
+    const url = `/api/docs/${docId}`;
+    console.log('[Widget] REST probe — fetch:', url);
+    const resp = await fetch(url, { credentials: 'include' });
+    console.log('[Widget] REST probe — status:', resp.status, resp.statusText);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    console.log('[Widget] REST /api/docs →', data.access);
+    return data.access || null; // 'owners' | 'editors' | 'viewers'
+  } catch(e) {
+    console.log('[Widget] REST probe — exception fetch:', e.message);
+    return null;
+  }
+}
+
 async function checkUserAccess() {
   userAccess = 'unchecked'; // masque les boutons pendant la vérification
   updateAccessUI();
   try {
-    const session = await grist.getUserSession();
-    // session.access : 'owners' | 'editors' | 'viewers' | undefined
-    userAccess = session ? (session.access || null) : null;
+    if (typeof grist.getUserSession === 'function') {
+      // API disponible (versions récentes de Grist)
+      const session = await grist.getUserSession();
+      userAccess = session ? (session.access || 'viewers') : null;
+
+    } else {
+      // Fallback 1 : API REST Grist (même origine, cookie de session)
+      // Fiable et sans effet de bord, même si _grist_ACLRules est lisible par tous.
+      const restAccess = await fetchDocAccessViaRest();
+      if (restAccess) {
+        userAccess = restAccess;
+      } else {
+        // Fallback 2 : tenter une écriture sur _grist_ACLRules
+        // Sur certaines instances Grist, la lecture des ACL est ouverte aux éditeurs,
+        // mais l'écriture reste réservée aux propriétaires.
+        // Un no-op UpdateRecord (champs vides) sur la ligne 1 suffit à tester.
+        try {
+          await grist.docApi.applyUserActions([['UpdateRecord', '_grist_ACLRules', 1, {}]]);
+          userAccess = 'owners';
+          console.log('[Widget] ACL write probe → owners');
+        } catch(eWrite) {
+          // Pas propriétaire — distinguer éditeur de viewer via lecture table
+          try {
+            await grist.docApi.fetchTable('_grist_Tables');
+            userAccess = 'editors';
+          } catch(eRead) {
+            userAccess = 'viewers';
+          }
+          console.log('[Widget] ACL write probe → non-owner, userAccess =', userAccess);
+        }
+      }
+    }
   } catch(e) {
-    userAccess = null; // API indisponible → mode dev, tout visible
+    // API complètement indisponible → contexte dev local hors Grist
+    userAccess = null;
   }
+  console.log('[Widget] userAccess =', userAccess, '| isOwner() =', isOwner());
   updateAccessUI();
 }
 
-// Teste l'accès en écriture sur la table via un UpdateRecord à champs vides.
-// C'est un no-op (rien n'est modifié) mais les règles ACL avancées de Grist sont
-// vérifiées, ce qui permet de détecter si l'utilisateur peut écrire dans cette table.
+// Détermine l'accès en écriture sur la table.
+// - Propriétaires : accès garanti, pas besoin de sonde (évite le toast Grist)
+// - Viewers      : accès impossible, pas besoin de sonde
+// - Éditeurs     : sonde via UpdateRecord vide (peut déclencher un toast Grist si bloqué
+//                  par des règles ACL spécifiques à la table — comportement Grist attendu)
 async function checkTableWriteAccess() {
   if (!tableId || allRecords.length === 0) return;
   if (tableWriteChecked === tableId) return; // déjà vérifié pour cette table
   tableWriteChecked = tableId;
+
+  if (isOwner()) {
+    // Propriétaires : accès en écriture toujours garanti dans Grist
+    canWriteTable = true;
+    updateAccessUI();
+    updateTopbarButtons();
+    return;
+  }
+  if (userAccess === 'viewers') {
+    // Viewers : aucune écriture possible
+    canWriteTable = false;
+    updateAccessUI();
+    updateTopbarButtons();
+    return;
+  }
+  // Éditeurs : vérification fine via ACL table (UpdateRecord no-op)
   try {
     await grist.docApi.applyUserActions([['UpdateRecord', tableId, allRecords[0].id, {}]]);
     canWriteTable = true;
@@ -643,6 +735,7 @@ function toggleDataEditModeGuard() {
 // MODE CONFIGURATION
 // ══════════════════════════════════════════════
 function toggleEditMode() {
+  if (!isOwner()) return; // seuls les propriétaires peuvent entrer en mode configuration
   editMode = !editMode;
   if (editMode) dataEditMode = false; // config mode désactive l'édition données
   el('product-form').classList.toggle('edit-mode', editMode);
