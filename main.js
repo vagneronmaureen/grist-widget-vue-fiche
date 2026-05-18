@@ -168,12 +168,16 @@ async function checkUserAccess() {
       if (restAccess) {
         userAccess = restAccess;
       } else {
-        // Fallback 2 : REST indisponible (widget cross-origin ou CORS bloqué).
-        // On ne peut pas distinguer owner/editor sans écrire dans Grist (ce qui provoque
-        // des boucles). Fallback sur 'owners' pour ne pas bloquer le propriétaire —
-        // les logs ci-dessus permettront de diagnostiquer et corriger.
-        userAccess = 'owners';
-        console.log('[Widget] fallback → owners (REST probe échoué, voir logs REST probe)');
+        // Fallback 2 : lecture _grist_ACLRules (opération sans effet de bord, pas d'écriture).
+        // Sur cette instance Grist, la table est lisible par owners et editors — le bouton
+        // Configurer sera donc visible aux deux, mais au moins le propriétaire peut l'utiliser.
+        try {
+          await grist.docApi.fetchTable('_grist_ACLRules');
+          userAccess = 'owners';
+        } catch(e) {
+          userAccess = 'editors';
+        }
+        console.log('[Widget] fallback _grist_ACLRules → userAccess =', userAccess);
       }
     }
   } catch(e) {
