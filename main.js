@@ -111,10 +111,19 @@ async function checkUserAccess() {
   updateAccessUI();
   try {
     const session = await grist.getUserSession();
-    // session.access : 'owners' | 'editors' | 'viewers' | undefined
-    userAccess = session ? (session.access || null) : null;
+    if (!session) {
+      // Pas de session Grist → contexte de développement local, tout visible
+      userAccess = null;
+    } else if (session.access) {
+      // Valeur explicite retournée par Grist ('owners' | 'editors' | 'viewers')
+      userAccess = session.access;
+    } else {
+      // Session présente mais access absent → droits inconnus, on restreint par sécurité
+      userAccess = 'viewers';
+    }
   } catch(e) {
-    userAccess = null; // API indisponible → mode dev, tout visible
+    // API indisponible (hors Grist) → mode développement, tout visible
+    userAccess = null;
   }
   updateAccessUI();
 }
@@ -643,6 +652,7 @@ function toggleDataEditModeGuard() {
 // MODE CONFIGURATION
 // ══════════════════════════════════════════════
 function toggleEditMode() {
+  if (!isOwner()) return; // seuls les propriétaires peuvent entrer en mode configuration
   editMode = !editMode;
   if (editMode) dataEditMode = false; // config mode désactive l'édition données
   el('product-form').classList.toggle('edit-mode', editMode);
