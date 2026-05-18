@@ -476,6 +476,15 @@ loadLayout();
 checkUserAccess();
 loadSelectionMode();
 
+// Log diagnostique : inspecte ce que Grist envoie via onOptions
+// (peut contenir le niveau d'accès utilisateur dans certaines versions)
+if (typeof grist.onOptions === 'function') {
+  grist.onOptions((options, settings) => {
+    console.log('[Widget] onOptions — options:', JSON.stringify(options));
+    console.log('[Widget] onOptions — settings:', JSON.stringify(settings));
+  });
+}
+
 grist.onRecords(async (records) => {
   allRecords = records;
   if (!tableId) { try { tableId = await grist.getSelectedTableId(); } catch(e) {} }
