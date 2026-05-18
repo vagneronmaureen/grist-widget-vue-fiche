@@ -165,23 +165,31 @@ async function checkUserAccess() {
       if (restAccess) {
         userAccess = restAccess;
       } else {
-        // Fallback 2 : tenter une écriture sur _grist_ACLRules
-        // Sur certaines instances Grist, la lecture des ACL est ouverte aux éditeurs,
-        // mais l'écriture reste réservée aux propriétaires.
-        // Un no-op UpdateRecord (champs vides) sur la ligne 1 suffit à tester.
+        // Fallback 2 : lire _grist_ACLResources (plus restrictif que _grist_ACLRules
+        // sur certaines instances). Si indisponible, tenter _grist_Tables pour distinguer
+        // éditeur de viewer.
+        // NOTE : ne JAMAIS écrire dans les tables ACL (_grist_ACLRules etc.) ici —
+        // cela déclenche une rechargement global du document sur tous les clients (boucle infinie).
+        let aclReadOk = false;
         try {
-          await grist.docApi.applyUserActions([['UpdateRecord', '_grist_ACLRules', 1, {}]]);
+          await grist.docApi.fetchTable('_grist_ACLResources');
+          aclReadOk = true;
+        } catch(e) { /* non disponible ou refusé */ }
+
+        if (aclReadOk) {
+          // Si on peut lire _grist_ACLResources, tenter aussi _grist_ACLPrincipals
+          // (sur certaines instances, seuls les owners ont accès à ces tables)
           userAccess = 'owners';
-          console.log('[Widget] ACL write probe → owners');
-        } catch(eWrite) {
-          // Pas propriétaire — distinguer éditeur de viewer via lecture table
+          console.log('[Widget] ACL resource probe → owners (fallback, vérifier avec REST)');
+        } else {
+          // Ne peut pas lire les tables ACL → pas propriétaire
           try {
             await grist.docApi.fetchTable('_grist_Tables');
             userAccess = 'editors';
           } catch(eRead) {
             userAccess = 'viewers';
           }
-          console.log('[Widget] ACL write probe → non-owner, userAccess =', userAccess);
+          console.log('[Widget] ACL resource probe → non-owner, userAccess =', userAccess);
         }
       }
     }
