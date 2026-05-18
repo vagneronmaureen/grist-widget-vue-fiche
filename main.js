@@ -110,44 +110,41 @@ function canWrite() { return isOwner() || userAccess === 'editors'; }
 // GET /api/docs/{docId} retourne { access: 'owners'|'editors'|'viewers' }
 // Fonctionne en same-origin grâce aux cookies de session, sans effet de bord, sans toast.
 async function fetchDocAccessViaRest() {
+  // Logs détaillés pour diagnostiquer les problèmes
   const referrer = document.referrer || '';
   const selfHref = window.location.href || '';
-  console.log('[Widget] REST probe — referrer:', referrer || '(vide)');
-  console.log('[Widget] REST probe — href:', selfHref);
+  console.log('[Widget] REST probe — document.referrer:', referrer || '(vide)');
+  console.log('[Widget] REST probe — window.location.href:', selfHref);
 
-  // Extrait l'origine Grist (ex: https://grist.numerique.gouv.fr) depuis le referrer
-  const originMatch = referrer.match(/^(https?:\/\/[^/]+)/);
-  const gristOrigin = originMatch ? originMatch[1] : null;
-
-  // Cherche le docId dans le referrer puis dans window.location
+  // Cherche le docId dans le referrer ET dans window.location
   let docId = null;
-  for (const src of [referrer, selfHref]) {
+  const sources = [referrer, selfHref];
+  for (const src of sources) {
     if (!src) continue;
-    let m = src.match(/\/o\/[^/]+\/([a-zA-Z0-9_-]{6,})/);
-    if (m) { docId = m[1]; break; }
+    // Format typique : /o/{org}/{docId}/p/{page} ou /o/{org}/{docId}/
+    let m = src.match(/\/o\/[^/]+\/([a-zA-Z0-9_-]{6,})\//);
+    if (m) { docId = m[1]; console.log('[Widget] REST probe — docId trouvé (format /o/) dans:', src); break; }
+    // Format alternatif : /doc/{docId}
     m = src.match(/\/doc\/([a-zA-Z0-9_-]{6,})/);
-    if (m) { docId = m[1]; break; }
+    if (m) { docId = m[1]; console.log('[Widget] REST probe — docId trouvé (format /doc/) dans:', src); break; }
   }
 
-  console.log('[Widget] REST probe — gristOrigin:', gristOrigin || '(non trouvé)', '| docId:', docId || '(non trouvé)');
-  if (!docId) return null;
-
-  // Si le widget est cross-origin (ex: GitHub Pages), on utilise l'URL absolue de Grist.
-  // Si same-origin, l'URL relative suffit.
-  const url = gristOrigin && !selfHref.startsWith(gristOrigin)
-    ? `${gristOrigin}/api/docs/${docId}`
-    : `/api/docs/${docId}`;
-  console.log('[Widget] REST probe — fetch:', url);
+  if (!docId) {
+    console.log('[Widget] REST probe — docId introuvable dans referrer ou href, abandon');
+    return null;
+  }
 
   try {
+    const url = `/api/docs/${docId}`;
+    console.log('[Widget] REST probe — fetch:', url);
     const resp = await fetch(url, { credentials: 'include' });
-    console.log('[Widget] REST probe — status:', resp.status);
+    console.log('[Widget] REST probe — status:', resp.status, resp.statusText);
     if (!resp.ok) return null;
     const data = await resp.json();
     console.log('[Widget] REST /api/docs →', data.access);
-    return data.access || null;
+    return data.access || null; // 'owners' | 'editors' | 'viewers'
   } catch(e) {
-    console.log('[Widget] REST probe — erreur:', e.message);
+    console.log('[Widget] REST probe — exception fetch:', e.message);
     return null;
   }
 }
@@ -168,16 +165,12 @@ async function checkUserAccess() {
       if (restAccess) {
         userAccess = restAccess;
       } else {
-        // Fallback 2 : lecture _grist_ACLRules (opération sans effet de bord, pas d'écriture).
-        // Sur cette instance Grist, la table est lisible par owners et editors — le bouton
-        // Configurer sera donc visible aux deux, mais au moins le propriétaire peut l'utiliser.
-        try {
-          await grist.docApi.fetchTable('_grist_ACLRules');
-          userAccess = 'owners';
-        } catch(e) {
-          userAccess = 'editors';
-        }
-        console.log('[Widget] fallback _grist_ACLRules → userAccess =', userAccess);
+        // Fallback 2 : impossible de déterminer le niveau d'accès de façon fiable
+        // sans écrire dans Grist (toute écriture peut provoquer des boucles de rechargement).
+        // Par sécurité, on se déclare 'editors' — le bouton Configurer reste caché,
+        // l'édition des données est possible. Les logs REST ci-dessus permettront de corriger.
+        userAccess = 'editors';
+        console.log('[Widget] fallback sécurisé → editors (REST probe a échoué, voir logs)');
       }
     }
   } catch(e) {
@@ -2143,7 +2136,7 @@ function initRichToolbar() {
     });
   });
 
-  // Afficher/repositionner la toolbar à chaque changement de sélection
+  // Afficher/repositionner la toolbar à chaque changement de sélection.
   document.addEventListener('selectionchange', () => {
     if (!editMode) { tb.style.display = 'none'; return; }
     const sel = window.getSelection();
