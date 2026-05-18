@@ -186,6 +186,9 @@ async function checkUserAccess() {
   }
   console.log('[Widget] userAccess =', userAccess, '| isOwner() =', isOwner());
   updateAccessUI();
+  // Relancer checkTableWriteAccess maintenant que userAccess est connu —
+  // un appel anticipé depuis onRecords (pendant 'unchecked') a pu être ignoré.
+  checkTableWriteAccess();
 }
 
 // Détermine l'accès en écriture sur la table.
@@ -194,6 +197,9 @@ async function checkUserAccess() {
 // peut déclencher des notifications Grist qui provoquent des boucles onRecords.
 function checkTableWriteAccess() {
   if (!tableId || allRecords.length === 0) return;
+  // Si checkUserAccess() n'a pas encore terminé, on attend — sans poser le verrou,
+  // pour pouvoir relancer une fois userAccess connu (voir fin de checkUserAccess).
+  if (userAccess === 'unchecked') return;
   if (tableWriteChecked === tableId) return; // déjà vérifié pour cette table
   tableWriteChecked = tableId;
   // owners et editors peuvent écrire ; viewers non
