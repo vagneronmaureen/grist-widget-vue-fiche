@@ -175,6 +175,7 @@ async function checkUserAccess() {
           userAccess = 'owners';
           console.log('[Widget] _OwnerAccess probe → owners');
         } catch(e) {
+          console.log('[Widget] _OwnerAccess probe — erreur fetchTable:', e && (e.message || String(e)));
           // Lecture refusée → pas propriétaire
           // Distinguer éditeur (peut lire _grist_ACLRules) de viewer (ne peut pas)
           try {
