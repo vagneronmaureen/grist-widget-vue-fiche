@@ -165,25 +165,25 @@ async function checkUserAccess() {
       if (restAccess) {
         userAccess = restAccess;
       } else {
-        // Fallback 2 : sonde grist.setOption (ne passe pas par le journal d'actions,
-        // pas de rechargement document). Si seuls les owners peuvent modifier les options
-        // du widget, cette sonde les distingue des éditeurs.
-        // On relit l'option avant pour faire un vrai no-op (réécrire la même valeur).
+        // Fallback 2 : sonde ACL — lecture d'une table protégée par règle ACL.
+        // Créer dans Grist une table "_OwnerAccess" (1 ligne) avec la règle :
+        //   Condition : user.access != "owners"  →  Deny Read
+        // Ainsi fetchTable réussit pour les owners et échoue pour les éditeurs/viewers.
+        // Aucun write, aucune entrée dans le journal d'actions, pas de boucle de rechargement.
         try {
-          const probeVal = await grist.getOption('_ownerProbe');
-          await grist.setOption('_ownerProbe', probeVal ?? null);
+          await grist.docApi.fetchTable('_OwnerAccess');
           userAccess = 'owners';
-          console.log('[Widget] setOption probe → owners');
+          console.log('[Widget] _OwnerAccess probe → owners');
         } catch(e) {
-          // setOption refusé → pas propriétaire
-          // Fallback final : lecture _grist_ACLRules pour distinguer viewer d'editor
+          // Lecture refusée → pas propriétaire
+          // Distinguer éditeur (peut lire _grist_ACLRules) de viewer (ne peut pas)
           try {
             await grist.docApi.fetchTable('_grist_ACLRules');
             userAccess = 'editors';
           } catch(e2) {
             userAccess = 'viewers';
           }
-          console.log('[Widget] setOption probe → non-owner, userAccess =', userAccess);
+          console.log('[Widget] _OwnerAccess probe → non-owner, userAccess =', userAccess);
         }
       }
     }
