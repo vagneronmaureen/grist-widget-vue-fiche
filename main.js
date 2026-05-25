@@ -110,11 +110,8 @@ function canWrite() { return isOwner() || userAccess === 'editors'; }
 // GET /api/docs/{docId} retourne { access: 'owners'|'editors'|'viewers' }
 // Fonctionne en same-origin grâce aux cookies de session, sans effet de bord, sans toast.
 async function fetchDocAccessViaRest() {
-  // Logs détaillés pour diagnostiquer les problèmes
   const referrer = document.referrer || '';
   const selfHref = window.location.href || '';
-  console.log('[Widget] REST probe — document.referrer:', referrer || '(vide)');
-  console.log('[Widget] REST probe — window.location.href:', selfHref);
 
   // Cherche le docId dans le referrer ET dans window.location
   let docId = null;
@@ -123,28 +120,20 @@ async function fetchDocAccessViaRest() {
     if (!src) continue;
     // Format typique : /o/{org}/{docId}/p/{page} ou /o/{org}/{docId}/
     let m = src.match(/\/o\/[^/]+\/([a-zA-Z0-9_-]{6,})\//);
-    if (m) { docId = m[1]; console.log('[Widget] REST probe — docId trouvé (format /o/) dans:', src); break; }
+    if (m) { docId = m[1]; break; }
     // Format alternatif : /doc/{docId}
     m = src.match(/\/doc\/([a-zA-Z0-9_-]{6,})/);
-    if (m) { docId = m[1]; console.log('[Widget] REST probe — docId trouvé (format /doc/) dans:', src); break; }
+    if (m) { docId = m[1]; break; }
   }
 
-  if (!docId) {
-    console.log('[Widget] REST probe — docId introuvable dans referrer ou href, abandon');
-    return null;
-  }
+  if (!docId) return null;
 
   try {
-    const url = `/api/docs/${docId}`;
-    console.log('[Widget] REST probe — fetch:', url);
-    const resp = await fetch(url, { credentials: 'include' });
-    console.log('[Widget] REST probe — status:', resp.status, resp.statusText);
+    const resp = await fetch(`/api/docs/${docId}`, { credentials: 'include' });
     if (!resp.ok) return null;
     const data = await resp.json();
-    console.log('[Widget] REST /api/docs →', data.access);
     return data.access || null; // 'owners' | 'editors' | 'viewers'
   } catch(e) {
-    console.log('[Widget] REST probe — exception fetch:', e.message);
     return null;
   }
 }
@@ -175,7 +164,6 @@ async function checkUserAccess() {
           userAccess = 'owners';
           console.log('[Widget] OwnerAccess probe → owners');
         } catch(e) {
-          console.log('[Widget] OwnerAccess probe — erreur fetchTable:', e && (e.message || String(e)));
           // Lecture refusée → pas propriétaire
           // Distinguer éditeur (peut lire _grist_ACLRules) de viewer (ne peut pas)
           try {
@@ -446,7 +434,8 @@ async function loadRawRecords() {
       const raw = rawRecords[currentRecord.id];
       let changed = false;
       allColumns.forEach(col => {
-        if (col.kind !== 'ref' && col.kind !== 'refList') return;
+        if (col.kind !== 'ref' && col.kind !== 'refList' &&
+            col.kind !== 'date' && col.kind !== 'datetime') return;
         if (pendingSavedValues && col.id in pendingSavedValues) return;
         const rawVal = raw[col.id];
         if (rawVal !== null && rawVal !== undefined) {
@@ -488,14 +477,6 @@ loadLayout();
 checkUserAccess();
 loadSelectionMode();
 
-// Log diagnostique : inspecte ce que Grist envoie via onOptions
-// (peut contenir le niveau d'accès utilisateur dans certaines versions)
-if (typeof grist.onOptions === 'function') {
-  grist.onOptions((options, settings) => {
-    console.log('[Widget] onOptions — options:', JSON.stringify(options));
-    console.log('[Widget] onOptions — settings:', JSON.stringify(settings));
-  });
-}
 
 grist.onRecords(async (records) => {
   allRecords = records;
@@ -540,14 +521,16 @@ grist.onRecord((record) => {
   if (pendingSavedValues) {
     record = { ...record, ...pendingSavedValues };
   }
-  // Grist envoie les valeurs d'affichage (ex: "Jean Dupont") dans onRecord pour
-  // les champs Ref/RefList, pas les vrais IDs. On patch avec rawRecords si disponible
-  // (rawRecords vient de fetchTable qui retourne les vraies valeurs brutes).
+  // Grist envoie les valeurs d'affichage dans onRecord pour certains types :
+  // - Ref/RefList : nom affiché (ex: "Jean Dupont") au lieu du vrai ID
+  // - Date/DateTime : chaîne formatée (ex: "15/01/2024") au lieu des secondes Unix
+  // On patch avec rawRecords (issu de fetchTable) pour récupérer les valeurs brutes.
   if (rawRecords[record.id]) {
     const raw = rawRecords[record.id];
     const patched = { ...record };
     allColumns.forEach(col => {
-      if (col.kind !== 'ref' && col.kind !== 'refList') return;
+      if (col.kind !== 'ref' && col.kind !== 'refList' &&
+          col.kind !== 'date' && col.kind !== 'datetime') return;
       if (pendingSavedValues && col.id in pendingSavedValues) return;
       const rawVal = raw[col.id];
       if (rawVal !== null && rawVal !== undefined) {
