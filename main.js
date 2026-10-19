@@ -519,6 +519,17 @@ async function loadColumnMeta() {
       const type = colMeta.type[i] || '';
       col.gristType = type;
 
+      // Mise en forme Grist : style de colonne (couleurs, gras…) et couleurs des choix
+      try {
+        const wo = JSON.parse(colMeta.widgetOptions[i] || '{}') || {};
+        col.style = {
+          textColor: wo.textColor, fillColor: wo.fillColor,
+          fontBold: !!wo.fontBold, fontItalic: !!wo.fontItalic,
+          fontUnderline: !!wo.fontUnderline, fontStrikethrough: !!wo.fontStrikethrough
+        };
+        col.choiceOptions = wo.choiceOptions || {};
+      } catch(e) { col.style = null; col.choiceOptions = {}; }
+
       if (type === 'Choice' || type === 'ChoiceList') {
         try {
           const opts = JSON.parse(colMeta.widgetOptions[i] || '{}');
@@ -1373,7 +1384,7 @@ function buildFieldDisplay(item, col, val, kind) {
     wrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:3px;padding:2px 0;';
     values.forEach(v => {
       const tag = document.createElement('span');
-      tag.style.cssText = 'display:inline-flex;padding:2px 8px;border-radius:10px;background:#e8f0fe;color:#1a73e8;font-size:11px;font-weight:600;';
+      tag.style.cssText = 'display:inline-flex;padding:2px 8px;border-radius:10px;font-size:11px;' + choicePillCss(col, v);
       tag.textContent = v;
       wrap.appendChild(tag);
     });
@@ -1385,6 +1396,7 @@ function buildFieldDisplay(item, col, val, kind) {
     const span = document.createElement('span');
     span.style.cssText = 'font-size:13px;color:var(--text);';
     span.textContent = formatDatePreview(val, kind === 'datetime');
+    applyColStyle(span, col);
     return span;
   }
   // Pièces jointes
@@ -1407,12 +1419,66 @@ function buildFieldDisplay(item, col, val, kind) {
   const span = document.createElement('span');
   span.style.cssText = 'font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.5;';
   span.textContent = text;
+  applyColStyle(span, col);
   return span;
 }
 
 // ══════════════════════════════════════════════
 // WIDGETS PAR TYPE
 // ══════════════════════════════════════════════
+
+// ══════════════════════════════════════════════
+// MISE EN FORME GRIST (couleurs des choix, style de colonne)
+// ══════════════════════════════════════════════
+
+// CSS d'une pastille de choix, d'après les options de la colonne dans Grist
+function choicePillCss(col, v) {
+  const co  = col.choiceOptions || {};
+  const has = Object.keys(co).length > 0;   // colonne avec des couleurs configurées
+  const o   = co[v] || {};
+  const bg  = o.fillColor || (has ? '#E8E8E8' : '#e8f0fe');
+  const fg  = o.textColor || (has ? '#000000' : '#1a73e8');
+  const deco = [o.fontUnderline && 'underline', o.fontStrikethrough && 'line-through'].filter(Boolean).join(' ');
+  return `background:${bg};color:${fg};font-weight:${o.fontBold ? 700 : 600};`
+       + (o.fontItalic ? 'font-style:italic;' : '')
+       + (deco ? `text-decoration:${deco};` : '');
+}
+
+// Pastille de choix (avec croix de suppression si onRemove est fourni)
+function makeChoicePill(col, text, onRemove) {
+  const tag = document.createElement('span');
+  tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:10px;font-size:11px;'
+                    + choicePillCss(col, text);
+  const lbl = document.createElement('span');
+  lbl.textContent = text;
+  tag.appendChild(lbl);
+  if (onRemove) {
+    const rm = document.createElement('span');
+    rm.textContent = '×';
+    rm.style.cssText = 'cursor:pointer;font-size:13px;line-height:1;opacity:.7;text-decoration:none;';
+    rm.addEventListener('mouseenter', () => rm.style.opacity = '1');
+    rm.addEventListener('mouseleave', () => rm.style.opacity = '.7');
+    rm.addEventListener('click', e => { e.stopPropagation(); onRemove(); });
+    tag.appendChild(rm);
+  }
+  return tag;
+}
+
+// Applique le style de colonne Grist (couleur du texte, fond, gras, italique…) à un élément
+function applyColStyle(elm, col) {
+  const s = col && col.style;
+  if (!s) return;
+  if (s.textColor) elm.style.color = s.textColor;
+  if (s.fontBold) elm.style.fontWeight = '700';
+  if (s.fontItalic) elm.style.fontStyle = 'italic';
+  const deco = [s.fontUnderline && 'underline', s.fontStrikethrough && 'line-through'].filter(Boolean).join(' ');
+  if (deco) elm.style.textDecoration = deco;
+  if (s.fillColor) {
+    elm.style.background = s.fillColor;
+    elm.style.padding = '2px 6px';
+    elm.style.borderRadius = '3px';
+  }
+}
 
 function buildBool(col, val) {
   const wrap = document.createElement('div');
@@ -1427,6 +1493,7 @@ function buildText(col, val, emptyText = 'Non renseigné') {
   const ta = document.createElement('textarea');
   ta.className='form-field-textarea'; ta.value=val||''; ta.rows=1; ta.placeholder=emptyText;
   ta.style.minHeight = '22px';
+  applyColStyle(ta, col);
   ta.addEventListener('input', () => {
     ta.style.height='auto'; ta.style.height=ta.scrollHeight+'px';
     markDirty(col.id, ta.value);
@@ -1438,6 +1505,7 @@ function buildText(col, val, emptyText = 'Non renseigné') {
 function buildNumber(col, val, emptyText = 'Non renseigné') {
   const inp = document.createElement('input');
   inp.type='number'; inp.className='form-field-input'; inp.value=val||''; inp.placeholder=emptyText;
+  applyColStyle(inp, col);
   inp.addEventListener('input', () => markDirty(col.id, inp.value===''?null:parseFloat(inp.value)));
   return inp;
 }
@@ -1445,6 +1513,7 @@ function buildNumber(col, val, emptyText = 'Non renseigné') {
 function buildLongText(col, val, emptyText = 'Non renseigné') {
   const ta = document.createElement('textarea');
   ta.className='form-field-textarea'; ta.value=val||''; ta.rows=3; ta.placeholder=emptyText;
+  applyColStyle(ta, col);
   ta.addEventListener('input', () => {
     ta.style.height='auto'; ta.style.height=ta.scrollHeight+'px'; markDirty(col.id, ta.value);
   });
@@ -1456,6 +1525,7 @@ function buildLongText(col, val, emptyText = 'Non renseigné') {
 function buildDate(col, val, withTime, emptyText = 'Non renseigné') {
   const inp = document.createElement('input');
   inp.type = withTime ? 'datetime-local' : 'date';
+  applyColStyle(inp, col);
   inp.className = 'form-field-input';
   inp.placeholder = emptyText;
 
@@ -1556,7 +1626,86 @@ function buildAttachment(col, val, emptyText = 'Non renseigné') {
 }
 
 // ── Choice (simple) ──
+// Liste déroulante personnalisée : les choix gardent leurs couleurs Grist
 function buildChoiceSelect(col, currentVal, emptyText = 'Non renseigné', onChange) {
+  let value = currentVal || null;
+
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative;';
+
+  const trigger = document.createElement('div');
+  trigger.tabIndex = 0;
+  trigger.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:24px;padding:2px 0;cursor:pointer;border-bottom:1.5px solid transparent;transition:border-color .15s;outline:none;';
+  trigger.addEventListener('mouseenter', () => trigger.style.borderBottomColor = 'var(--border)');
+  trigger.addEventListener('mouseleave', () => { if (dd.style.display !== 'block') trigger.style.borderBottomColor = 'transparent'; });
+
+  const dd = document.createElement('div');
+  dd.style.cssText = 'display:none;position:absolute;top:calc(100% + 4px);left:0;min-width:180px;max-width:100%;z-index:150;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:0 4px 16px rgba(0,0,0,0.12);padding:4px;max-height:240px;overflow-y:auto;';
+
+  const renderTrigger = () => {
+    trigger.innerHTML = '';
+    const left = document.createElement('span');
+    if (value) {
+      left.appendChild(makeChoicePill(col, value));
+    } else {
+      left.textContent = emptyText;
+      left.style.cssText = 'font-size:12px;color:var(--text-muted);font-style:italic;';
+    }
+    const chev = document.createElement('span');
+    chev.textContent = '▾';
+    chev.style.cssText = 'color:var(--text-muted);font-size:11px;flex-shrink:0;';
+    trigger.appendChild(left);
+    trigger.appendChild(chev);
+  };
+
+  const closeDd = () => { dd.style.display = 'none'; trigger.style.borderBottomColor = 'transparent'; };
+  const openDd  = () => { dd.style.display = 'block'; trigger.style.borderBottomColor = 'var(--accent)'; };
+
+  const addRow = (v) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'padding:5px 8px;cursor:pointer;border-radius:2px;transition:background .1s;';
+    if (v) {
+      row.appendChild(makeChoicePill(col, v));
+    } else {
+      row.textContent = '— ' + emptyText + ' —';
+      row.style.cssText += 'font-size:12px;color:var(--text-muted);font-style:italic;';
+    }
+    row.addEventListener('mouseenter', () => row.style.background = 'var(--bg)');
+    row.addEventListener('mouseleave', () => row.style.background = '');
+    row.addEventListener('click', e => {
+      e.stopPropagation();
+      value = v;
+      renderTrigger();
+      closeDd();
+      onChange(v);
+    });
+    dd.appendChild(row);
+  };
+  addRow(null);
+  (col.choices || []).forEach(c => addRow(c));
+
+  const toggle = e => { e.stopPropagation(); dd.style.display === 'block' ? closeDd() : openDd(); };
+  trigger.addEventListener('click', toggle);
+  trigger.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(e); }
+    if (e.key === 'Escape') closeDd();
+  });
+
+  // Fermeture au clic extérieur (le listener se retire seul quand le champ est re-rendu)
+  const onDoc = e => {
+    if (!wrap.isConnected) { document.removeEventListener('click', onDoc); return; }
+    if (!wrap.contains(e.target)) closeDd();
+  };
+  document.addEventListener('click', onDoc);
+
+  renderTrigger();
+  wrap.appendChild(trigger);
+  wrap.appendChild(dd);
+  return wrap;
+}
+
+// (ancienne version native, conservée au cas où)
+function buildChoiceSelectNative(col, currentVal, emptyText = 'Non renseigné', onChange) {
   const sel = document.createElement('select');
   sel.className = 'form-field-input';
   sel.style.cssText = 'cursor:pointer;appearance:auto;padding:2px 0;';
@@ -1598,7 +1747,7 @@ function buildChoiceList(col, currentVal, onChange) {
     // Tags des valeurs sélectionnées — ajoutés avant le dropdown via appendChild
     // mais comme dropdown est déjà dans wrap, ils se placent avant lui
     selected.forEach((s, i) => {
-      const tag = makePill(s, '#e8f0fe', '#1a73e8', () => {
+      const tag = makeChoicePill(col, s, () => {
         selected.splice(i, 1); renderAll(); onChange(selected.length ? ['L', ...selected] : null);
         const cell = wrap.closest('.form-field');
         if (cell && !editMode) cell.classList.toggle('field-empty', selected.length === 0);
@@ -1627,7 +1776,7 @@ function buildChoiceList(col, currentVal, onChange) {
       remaining.forEach(choice => {
         const item = document.createElement('div');
         item.style.cssText = 'padding:5px 8px;cursor:pointer;font-size:12px;border-radius:2px;transition:background .1s;';
-        item.textContent = choice;
+        item.appendChild(makeChoicePill(col, choice));
         item.addEventListener('mouseenter', () => item.style.background = 'var(--bg)');
         item.addEventListener('mouseleave', () => item.style.background = '');
         item.addEventListener('click', e => {
