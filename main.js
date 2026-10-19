@@ -15,6 +15,20 @@ let canWriteTable     = false;  // accès en écriture à la table courante (vé
 let tableWriteChecked = null;   // tableId pour laquelle l'accès a déjà été testé
 let tableId           = null;
 
+// ── Réglages du widget (définis en mode Configurer, persistés dans les options Grist) ──
+// editMethod : 'button' = modification via le bouton « Éditer » / 'direct' = champs modifiables directement
+let editMethod        = 'button';
+// Recherche produit (vue non liée) :
+//   labelCol   = colonne affichée (libellé)
+//   subCol     = colonne affichée en grisé entre parenthèses (ex. ID)
+//   searchCols = colonnes sur lesquelles porte la recherche
+let searchCfg         = { labelCol: null, subCol: null, searchCols: [] };
+
+// Vrai quand les champs doivent être affichés sous forme d'inputs modifiables
+function isDataEditing() {
+  return canWriteTable && !editMode && (editMethod === 'direct' || dataEditMode);
+}
+
 // Données des tables référencées : { tableId: { columns: [], rows: [{id, ...fields}] } }
 let refData = {};
 
@@ -202,14 +216,140 @@ function checkTableWriteAccess() {
   canWriteTable = canWrite();
   updateAccessUI();
   updateTopbarButtons();
+  if (editMethod === 'direct') renderForm(); // les champs deviennent modifiables d'emblée
 }
 
 function updateAccessUI() {
   const btnEdit     = el('btn-edit');
   const btnDataEdit = el('btn-data-edit');
   if (btnEdit)     btnEdit.style.display     = isOwner()      ? '' : 'none';
-  if (btnDataEdit) btnDataEdit.style.display = canWriteTable  ? '' : 'none';
+  if (btnDataEdit) btnDataEdit.style.display = (canWriteTable && editMethod !== 'direct') ? '' : 'none';
   updateLinkBtn();
+}
+
+// ══════════════════════════════════════════════
+// PARAMÈTRES DU WIDGET (mode Configurer)
+// ══════════════════════════════════════════════
+async function loadSettings() {
+  try {
+    const s = await grist.getOption('settings');
+    if (s && typeof s === 'object') {
+      if (s.editMethod === 'direct' || s.editMethod === 'button') editMethod = s.editMethod;
+      if (s.search && typeof s.search === 'object') {
+        searchCfg = {
+          labelCol:   s.search.labelCol || null,
+          subCol:     s.search.subCol   || null,
+          searchCols: Array.isArray(s.search.searchCols) ? s.search.searchCols : []
+        };
+      }
+    }
+  } catch(e) {}
+  applySettings();
+}
+
+function saveSettings() {
+  try { grist.setOption('settings', { editMethod, search: searchCfg }); } catch(e) {}
+}
+
+// Réapplique les réglages à l'interface
+function applySettings() {
+  if (editMethod === 'direct') dataEditMode = false; // le bouton « Éditer » n'a plus de sens
+  updateAccessUI();
+  updateTopbarButtons();
+  updateSaveButtons();
+  populateSelect();
+  renderForm();
+}
+
+function openSettingsModal() {
+  if (!isOwner() || !editMode) return;
+  const old = el('settings-modal');
+  if (old) old.remove();
+
+  const effSearch = searchCfg.searchCols.length
+    ? searchCfg.searchCols
+    : [searchCfg.labelCol, searchCfg.subCol].filter(Boolean);
+
+  const colOptions = (selected, noneLabel) =>
+    `<option value="">${noneLabel}</option>` +
+    allColumns.map(c =>
+      `<option value="${escHtml(c.id)}"${c.id === selected ? ' selected' : ''}>${escHtml(c.label || c.id)}</option>`
+    ).join('');
+
+  const modal = document.createElement('div');
+  modal.id = 'settings-modal';
+  modal.style.cssText = 'position:fixed;inset:0;z-index:400;background:rgba(0,0,0,0.22);display:flex;align-items:center;justify-content:center;';
+
+  const selStyle = 'width:100%;height:28px;border:1px solid var(--border);border-radius:var(--r);padding:0 6px;font-family:var(--font);font-size:13px;background:var(--surface);color:var(--text);';
+  const h = 'font-size:11px;font-weight:700;color:var(--text-label);text-transform:uppercase;letter-spacing:.07em;margin:0 0 8px;';
+  const hint = 'font-size:11px;color:var(--text-muted);margin-top:4px;line-height:1.4;';
+  const radioRow = 'display:flex;gap:8px;align-items:flex-start;padding:4px 0;font-size:13px;cursor:pointer;';
+
+  modal.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:4px;box-shadow:0 4px 20px rgba(0,0,0,0.14);width:420px;max-width:94vw;max-height:90vh;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="height:42px;padding:0 14px;border-bottom:1px solid var(--border);font-size:13px;font-weight:600;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;">
+        <span>Paramètres du widget</span>
+        <button id="st-close" style="border:none;background:none;cursor:pointer;font-size:18px;color:var(--text-muted);">×</button>
+      </div>
+      <div style="padding:14px;overflow-y:auto;display:flex;flex-direction:column;gap:18px;">
+
+        <div>
+          <div style="${h}">Modification des informations</div>
+          <label style="${radioRow}">
+            <input type="radio" name="st-editmethod" value="button" ${editMethod === 'button' ? 'checked' : ''} style="margin-top:3px;accent-color:var(--accent);">
+            <span><b>Via le bouton « Éditer »</b><br><span style="color:var(--text-muted);font-size:12px;">Les champs sont en lecture jusqu'au clic sur « Éditer ».</span></span>
+          </label>
+          <label style="${radioRow}">
+            <input type="radio" name="st-editmethod" value="direct" ${editMethod === 'direct' ? 'checked' : ''} style="margin-top:3px;accent-color:var(--accent);">
+            <span><b>Directement dans les champs</b><br><span style="color:var(--text-muted);font-size:12px;">Les champs sont toujours modifiables (si vous avez les droits d'écriture). « Enregistrer » apparaît dès qu'une valeur change.</span></span>
+          </label>
+          <div style="${hint}">Pour verrouiller certains champs dans les deux cas, utilisez le bouton « 🔓 Modifiable / 🔒 Lecture seule » dans la barre d'outils de chaque champ.</div>
+        </div>
+
+        <div>
+          <div style="${h}">Recherche de produit (vue non liée)</div>
+          <div style="font-size:12px;color:var(--text-label);margin-bottom:4px;">Champ affiché (libellé)</div>
+          <select id="st-label" style="${selStyle}">${colOptions(searchCfg.labelCol, '— détecté automatiquement —')}</select>
+
+          <div style="font-size:12px;color:var(--text-label);margin:10px 0 4px;">Champ secondaire (affiché en grisé entre parenthèses)</div>
+          <select id="st-sub" style="${selStyle}">${colOptions(searchCfg.subCol, '— aucun —')}</select>
+
+          <div style="font-size:12px;color:var(--text-label);margin:10px 0 4px;">La recherche porte sur</div>
+          <div id="st-search-cols" style="border:1px solid var(--border);border-radius:var(--r);padding:6px 10px;max-height:150px;overflow-y:auto;">
+            ${allColumns.map(c => `
+              <label style="display:flex;gap:7px;align-items:center;padding:3px 0;font-size:13px;cursor:pointer;">
+                <input type="checkbox" class="grist-check" value="${escHtml(c.id)}" ${effSearch.includes(c.id) ? 'checked' : ''}>
+                ${escHtml(c.label || c.id)}
+              </label>`).join('')}
+          </div>
+          <div style="${hint}">Exemple : libellé = « Libellé », secondaire = « ID », recherche sur les deux : on tape l'ID ou le libellé, la liste n'affiche que « Libellé <span style="color:var(--text-muted)">(ID)</span> ». Sans case cochée, la recherche porte sur les champs affichés.</div>
+        </div>
+
+      </div>
+      <div style="padding:10px 14px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0;">
+        <button id="st-cancel" class="tb-btn">Annuler</button>
+        <button id="st-ok" class="tb-btn active">Appliquer</button>
+      </div>
+    </div>`;
+
+  const close = () => modal.remove();
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+  document.body.appendChild(modal);
+  el('st-close').addEventListener('click', close);
+  el('st-cancel').addEventListener('click', close);
+  el('st-ok').addEventListener('click', () => {
+    const r = modal.querySelector('input[name="st-editmethod"]:checked');
+    editMethod = (r && r.value === 'direct') ? 'direct' : 'button';
+    searchCfg = {
+      labelCol:   el('st-label').value || null,
+      subCol:     el('st-sub').value   || null,
+      searchCols: Array.from(modal.querySelectorAll('#st-search-cols input:checked')).map(i => i.value)
+    };
+    saveSettings();
+    applySettings();
+    close();
+    showToast('✓ Paramètres enregistrés');
+  });
 }
 
 // ── Mode édition des données ──
@@ -234,7 +374,7 @@ function updateTopbarButtons() {
     btnDataEdit.style.display = 'none';
     return;
   }
-  btnDataEdit.style.display = canWriteTable ? '' : 'none';
+  btnDataEdit.style.display = (canWriteTable && editMethod !== 'direct') ? '' : 'none';
   if (dataEditMode) {
     btnDataEdit.innerHTML = `<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg> Enregistrer`;
     btnDataEdit.classList.add('active');
@@ -474,6 +614,7 @@ function getRefRows(refTableId, labelField) {
 // ══════════════════════════════════════════════
 grist.ready({ requiredAccess: 'full' });
 loadLayout();
+loadSettings();
 checkUserAccess();
 loadSelectionMode();
 
@@ -560,12 +701,40 @@ grist.onRecord((record) => {
 let _productLabels = []; // cache [{id, label}]
 
 function getProductLabel(r) {
+  // Colonne libellé choisie en mode Configurer
+  if (searchCfg.labelCol) {
+    const v = r[searchCfg.labelCol];
+    if (v !== null && v !== undefined && v !== '') return String(v);
+  }
   const nf = allColumns.find(c => /nom|name|titre|title|label|produit|product|designation|ref/i.test(c.id));
   return nf ? (r[nf.id] || `#${r.id}`) : `Enregistrement #${r.id}`;
 }
 
+// Valeur secondaire (ex. ID) affichée en grisé entre parenthèses
+function getProductSub(r) {
+  if (!searchCfg.subCol || searchCfg.subCol === searchCfg.labelCol) return '';
+  const v = r[searchCfg.subCol];
+  return (v === null || v === undefined || v === '') ? '' : String(v);
+}
+
+// Textes (en minuscules) sur lesquels la recherche porte pour un enregistrement
+function getSearchTerms(r, label) {
+  let cols = searchCfg.searchCols.length
+    ? searchCfg.searchCols
+    : [searchCfg.labelCol, searchCfg.subCol].filter(Boolean);
+  const terms = cols
+    .map(c => r[c])
+    .filter(v => v !== null && v !== undefined && v !== '')
+    .map(v => String(v).toLowerCase());
+  if (!terms.length) terms.push(label.toLowerCase());
+  return terms;
+}
+
 function populateSelect() {
-  _productLabels = allRecords.map(r => ({ id: r.id, label: getProductLabel(r) }));
+  _productLabels = allRecords.map(r => {
+    const label = getProductLabel(r);
+    return { id: r.id, label, sub: getProductSub(r), terms: getSearchTerms(r, label) };
+  });
   const n = allRecords.length;
   el('product-count').textContent = `${n} produit${n>1?'s':''}`;
   // Met à jour l'input si un record est sélectionné
@@ -588,9 +757,11 @@ function setupProductSearch() {
     if (!q) {
       items = [..._productLabels].sort(cmp);
     } else {
-      // Groupe 1 : commence par la recherche — Groupe 2 : contient la recherche ailleurs
-      const starts   = _productLabels.filter(p =>  p.label.toLowerCase().startsWith(q)).sort(cmp);
-      const contains = _productLabels.filter(p => !p.label.toLowerCase().startsWith(q) && p.label.toLowerCase().includes(q)).sort(cmp);
+      // Recherche sur tous les champs configurés (ex. ID et libellé)
+      // Groupe 1 : un champ commence par la recherche — Groupe 2 : un champ la contient
+      const matches  = _productLabels.filter(p => p.terms.some(t => t.includes(q)));
+      const starts   = matches.filter(p =>  p.terms.some(t => t.startsWith(q))).sort(cmp);
+      const contains = matches.filter(p => !p.terms.some(t => t.startsWith(q))).sort(cmp);
       items = [...starts, ...contains];
     }
 
@@ -605,15 +776,15 @@ function setupProductSearch() {
         const row = document.createElement('div');
         row.style.cssText = `padding:7px 12px;cursor:pointer;font-size:13px;transition:background .1s;
           ${isCurrent ? 'background:var(--accent-light);color:var(--accent);font-weight:600;' : ''}`;
-        // Surlignage de la recherche
-        if (q) {
-          const qi = p.label.toLowerCase().indexOf(q);
-          row.innerHTML = qi >= 0
-            ? escHtml(p.label.slice(0,qi)) + `<strong style="color:var(--accent)">${escHtml(p.label.slice(qi,qi+q.length))}</strong>` + escHtml(p.label.slice(qi+q.length))
-            : escHtml(p.label);
-        } else {
-          row.textContent = p.label;
-        }
+        // Libellé + (valeur secondaire grisée), avec surlignage de la recherche
+        const hl = txt => {
+          const qi = q ? txt.toLowerCase().indexOf(q) : -1;
+          return qi >= 0
+            ? escHtml(txt.slice(0,qi)) + `<strong style="color:var(--accent)">${escHtml(txt.slice(qi,qi+q.length))}</strong>` + escHtml(txt.slice(qi+q.length))
+            : escHtml(txt);
+        };
+        row.innerHTML = hl(p.label)
+          + (p.sub ? ` <span style="color:var(--text-muted);font-weight:400;font-size:12px;">(${hl(p.sub)})</span>` : '');
         row.addEventListener('mouseenter', () => { if (!isCurrent) row.style.background = 'var(--bg)'; });
         row.addEventListener('mouseleave', () => { if (!isCurrent) row.style.background = ''; });
         row.addEventListener('mousedown', async e => {
@@ -663,13 +834,13 @@ function updateSaveButtons() {
   // - on est en mode édition données
   // - il y a des changements en attente
   // - l'utilisateur a les droits d'écriture sur la table
-  const show = hasPendingChanges() && dataEditMode && canWriteTable;
+  const show = hasPendingChanges() && isDataEditing();
   el('btn-save').classList.toggle('visible', show);
   el('btn-discard').classList.toggle('visible', show);
 
   // Quand Annuler/Enregistrer sont visibles, masquer btn-data-edit pour éviter le doublon
   const btnDataEdit = el('btn-data-edit');
-  if (btnDataEdit && dataEditMode && !editMode) {
+  if (btnDataEdit && editMethod !== 'direct' && dataEditMode && !editMode) {
     btnDataEdit.style.display = show ? 'none' : (canWriteTable ? '' : 'none');
   }
 }
@@ -1022,6 +1193,12 @@ function buildFieldCell(item, idx) {
     label.appendChild(ico);
   }
   label.appendChild(document.createTextNode(item.label || col.label || item.colId));
+  if (item.readOnly && editMode) {
+    const lk = document.createElement('span');
+    lk.textContent = '🔒'; lk.title = 'Lecture seule';
+    lk.style.cssText = 'font-size:10px;margin-left:2px;';
+    label.appendChild(lk);
+  }
 
   // Icône ⓘ si la colonne a une description renseignée dans Grist
   if (col.description) {
@@ -1065,7 +1242,7 @@ function buildFieldCell(item, idx) {
 
   if (isEmpty) cell.classList.add('field-empty');
 
-  if (!dataEditMode) {
+  if (!isDataEditing()) {
     // Mode vue (présentation) : affichage statique
     if (isEmpty) {
       const emptySpan = document.createElement('span');
@@ -1079,8 +1256,8 @@ function buildFieldCell(item, idx) {
     return cell;
   }
 
-  // Champ formule pure : non modifiable en mode édition données
-  if (col.isFormula) {
+  // Champ formule pure ou champ défini en lecture seule : non modifiable
+  if (col.isFormula || item.readOnly) {
     if (isEmpty) {
       const emptySpan = document.createElement('span');
       emptySpan.className = 'field-empty-display';
@@ -1091,8 +1268,10 @@ function buildFieldCell(item, idx) {
       if (displayEl) cell.appendChild(displayEl);
     }
     const badge = document.createElement('span');
-    badge.textContent = 'FORMULE';
-    badge.title = 'Ce champ est calculé automatiquement et ne peut pas être modifié';
+    badge.textContent = col.isFormula ? 'FORMULE' : 'LECTURE SEULE';
+    badge.title = col.isFormula
+      ? 'Ce champ est calculé automatiquement et ne peut pas être modifié'
+      : 'Ce champ est en lecture seule dans ce widget';
     badge.style.cssText = 'font-size:10px;font-weight:600;letter-spacing:.05em;color:var(--text-muted);background:var(--surface-alt,#f0f0f0);border:1px solid var(--border);border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:middle;float:right;';
     label.appendChild(badge);
     return cell;
@@ -1722,6 +1901,13 @@ function addOverlay(div, idx) {
       showEmptyTextPicker(idx, emptyBtn, item.emptyText || '');
     });
     tb.appendChild(emptyBtn);
+
+    // Lecture seule : le champ n'est jamais modifiable, quel que soit le mode d'édition
+    const roBtn = tbBtn(item.readOnly ? '🔒 Lecture seule' : '🔓 Modifiable', !!item.readOnly);
+    roBtn.addEventListener('click', e => {
+      e.stopPropagation(); layout[idx].readOnly = !item.readOnly; saveLayout(); renderForm();
+    });
+    tb.appendChild(roBtn);
 
     // Renommer (dans le widget uniquement, pas dans Grist)
     const renBtn = tbBtn('✏ Renommer', false);

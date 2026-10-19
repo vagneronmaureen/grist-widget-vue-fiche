@@ -9,6 +9,9 @@ Widget Grist personnalisable permettant d'afficher les enregistrements sous form
 - Ajout / suppression / renommage de champs à la volée
 - Sauvegarde du layout dans les options du widget
 - Enregistrement des modifications directement dans Grist
+- **Mode de modification au choix** (Configurer → ⚙ Paramètres) : via le bouton « Éditer », ou directement dans les champs
+- **Champs en lecture seule** (Configurer → survol d'un champ → 🔒) : jamais modifiables, dans les deux modes
+- **Recherche produit multi-champs** (vue non liée, Configurer → ⚙ Paramètres) : libellé affiché, champ secondaire grisé entre parenthèses (ex. ID), et choix des colonnes sur lesquelles porte la recherche
 
 ## Installation
 
@@ -48,3 +51,4 @@ Nécessite un accès **full** à l'API Grist (`grist.ready({ requiredAccess: 'fu
 |---|---|
 | v1.0 | Version initiale — layout configurable, tous types de champs |
 | v2.0 | Version avec un style Notion plus prononcé |
+| v3.0 | Mode d'édition configurable (bouton / direct), champs en lecture seule, recherche produit multi-champs |
