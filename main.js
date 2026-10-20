@@ -25,6 +25,8 @@ let _totalForLen      = -1;     // taille de liste pour laquelle totalRows a ét
 // curseur sur la première ligne. Si true, on n'affiche une fiche que lorsque la liste reçue est
 // plus petite que la table (= un filtre est réellement appliqué).
 let linkedNeedsFilter = true;
+let _initSig          = null;   // liste (ids) reçue à l'arrivée = état par défaut de Grist
+let _userChanged      = false;  // true dès que la liste diffère de l'état par défaut
 
 // ── Réglages du widget (définis en mode Configurer, persistés dans les options Grist) ──
 // editMethod : 'button' = modification via le bouton « Éditer » / 'direct' = champs modifiables directement
@@ -324,7 +326,7 @@ function openSettingsModal() {
           <div style="${h}">Vue liée à un filtre</div>
           <label style="${radioRow}">
             <input type="checkbox" id="st-linkedfilter" ${linkedNeedsFilter ? 'checked' : ''} style="margin-top:3px;accent-color:var(--accent);">
-            <span><b>N'afficher une fiche que si le filtre est appliqué</b><br><span style="color:var(--text-muted);font-size:12px;">Pour un widget relié à un menu déroulant : tant qu'aucune valeur n'est choisie (filtre à null), Grist envoie toute la table et la première ligne serait affichée à tort. À décocher si le widget est relié à une table par « Sélectionner par » (liaison par curseur).</span></span>
+            <span><b>Ignorer l'état par défaut de Grist (menu déroulant à null)</b><br><span style="color:var(--text-muted);font-size:12px;">À cocher quand le lien est de type « Link applies filter » (table liée par un champ au menu déroulant) : à l'arrivée sur la page, Grist applique le filtre sur la ligne 1 alors que rien n'est choisi. La fiche n'apparaît qu'après le premier changement du menu déroulant (un premier choix identique à la valeur par défaut n'est pas détectable). À décocher quand le lien est de type « Link sets cursor » (même table que le menu déroulant).</span></span>
           </label>
         </div>
 
@@ -732,6 +734,16 @@ function syncRecord(fromCursor = false) {
 
   if (selectionMode === 'linked' && linkedNeedsFilter) {
     if (!totalChecked) return; // on attend le nombre total de lignes (évite d'afficher la 1re ligne à tort)
+
+    // Liaison par FILTRE sur une table liée (ex. Etape.Etude = ligne du menu déroulant) :
+    // à l'arrivée sur la page, Grist applique le filtre sur la ligne 1 de la table source par défaut
+    // (« Etude = [1] »), alors que le menu déroulant est à null. La liste reçue est donc déjà
+    // « filtrée » sans que l'utilisateur ait rien choisi. On mémorise cette première liste non vide
+    // comme état par défaut, et on n'affiche une fiche qu'une fois que la liste a changé.
+    const sig = allRecords.map(r => r.id).join(',');
+    if (_initSig === null) { if (allRecords.length > 0) _initSig = sig; }
+    else if (sig !== _initSig) _userChanged = true;
+
     if (totalRows === null) {
       target = inList(rec) ? rec : null; // total inconnu : repli sur le curseur
     } else if (allRecords.length > 0 && allRecords.length < totalRows) {
@@ -740,6 +752,9 @@ function syncRecord(fromCursor = false) {
       target = inList(rec) ? rec : allRecords[0];
     }
     // sinon : liste = toute la table (ou vide) → aucune sélection, target reste null
+
+    // État par défaut de Grist (aucun changement du menu déroulant depuis l'arrivée) → pas de fiche
+    if (!_userChanged) target = null;
   } else {
     target = inList(rec) ? rec : null;
   }
