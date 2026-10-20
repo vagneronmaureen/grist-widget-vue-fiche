@@ -555,7 +555,12 @@ async function loadColumnMeta() {
           fontUnderline: !!wo.fontUnderline, fontStrikethrough: !!wo.fontStrikethrough
         };
         col.choiceOptions = wo.choiceOptions || {};
-      } catch(e) { col.style = null; col.choiceOptions = {}; }
+        // Format numérique Grist (pourcentage, devise, décimales…)
+        col.numFmt = {
+          numMode: wo.numMode, currency: wo.currency, numSign: wo.numSign,
+          decimals: wo.decimals, maxDecimals: wo.maxDecimals
+        };
+      } catch(e) { col.style = null; col.choiceOptions = {}; col.numFmt = null; }
 
       if (type === 'Choice' || type === 'ChoiceList') {
         try {
@@ -1395,6 +1400,38 @@ function buildFieldCell(item, idx) {
   return cell;
 }
 
+// ── Format numérique Grist (panneau « Format de colonne » : nombre, devise, pourcentage…) ──
+// numMode : 'decimal' | 'currency' | 'percent' | 'scientific' | undefined (nombre brut)
+// decimals = décimales minimum, maxDecimals = décimales maximum, numSign 'parens' = négatifs entre parenthèses
+function formatGristNumber(val, f) {
+  if (typeof val !== 'number' || !isFinite(val)) return String(val);
+  f = f || {};
+  const isInt = n => Number.isInteger(n) && n >= 0 && n <= 20;
+  const mode  = f.numMode;
+  const defMin = mode === 'currency' ? 2 : 0;
+  const defMax = mode === 'currency' ? 2 : 10;
+  const minD = isInt(f.decimals) ? f.decimals : defMin;
+  let   maxD = isInt(f.maxDecimals) ? f.maxDecimals : Math.max(minD, defMax);
+  if (maxD < minD) maxD = minD;
+
+  const opts = { minimumFractionDigits: minD, maximumFractionDigits: maxD };
+  if (mode === 'percent')         opts.style = 'percent';
+  else if (mode === 'currency')   { opts.style = 'currency'; opts.currency = f.currency || 'EUR'; }
+  else if (mode === 'scientific') opts.notation = 'scientific';
+  else if (mode !== 'decimal')    opts.useGrouping = false;   // nombre brut : pas de séparateur de milliers
+
+  const fmt = v => {
+    try { return new Intl.NumberFormat('fr-FR', opts).format(v); }
+    catch(e) {
+      // devise inconnue : on retombe sur un format décimal simple
+      delete opts.style; delete opts.currency;
+      return new Intl.NumberFormat('fr-FR', opts).format(v);
+    }
+  };
+  if (f.numSign === 'parens' && val < 0) return '(' + fmt(Math.abs(val)) + ')';
+  return fmt(val);
+}
+
 function formatValPreview(val, col, labelField) {
   if (val===null||val===undefined||val==='') return 'Non renseigné';
   if (col.kind==='ref')        return getRefLabel(col.refTable, val, labelField);
@@ -1403,6 +1440,7 @@ function formatValPreview(val, col, labelField) {
   if (col.kind==='datetime')   return formatDatePreview(val, true);
   if (col.kind==='attachment') { const ids=Array.isArray(val)?val.filter(v=>typeof v==='number'&&v>0):[]; return ids.length?`${ids.length} pièce(s) jointe(s)`:'Aucune'; }
   if (Array.isArray(val))      return val.join(', ');
+  if (typeof val === 'number') return formatGristNumber(val, col.numFmt);
   return String(val);
 }
 
@@ -1505,7 +1543,10 @@ function buildFieldDisplay(item, col, val, kind) {
     return wrap;
   }
   // Texte / Nombre / LongText
-  const text = (val !== null && val !== undefined) ? String(val) : '';
+  // Les nombres (y compris les colonnes formule de type « Any ») suivent le format défini dans Grist
+  const text = (val !== null && val !== undefined)
+    ? (typeof val === 'number' ? formatGristNumber(val, col.numFmt) : String(val))
+    : '';
   if (!text) return null;
   const span = document.createElement('span');
   span.style.cssText = 'font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.5;';
@@ -1594,11 +1635,28 @@ function buildText(col, val, emptyText = 'Non renseigné') {
 }
 
 function buildNumber(col, val, emptyText = 'Non renseigné') {
+  // Colonne au format pourcentage : Grist stocke 0.35, l'utilisateur saisit et lit 35 (%)
+  const isPct = !!(col.numFmt && col.numFmt.numMode === 'percent');
+  const clean = n => Number(n.toPrecision(12)); // évite 0.35*100 = 35.00000000000001
+  const empty = val === null || val === undefined || val === '';
   const inp = document.createElement('input');
-  inp.type='number'; inp.className='form-field-input'; inp.value=val||''; inp.placeholder=emptyText;
+  inp.type='number'; inp.step='any'; inp.className='form-field-input'; inp.placeholder=emptyText;
+  inp.value = empty ? '' : String(isPct && typeof val === 'number' ? clean(val * 100) : val);
   applyColStyle(inp, col);
-  inp.addEventListener('input', () => markDirty(col.id, inp.value===''?null:parseFloat(inp.value)));
-  return inp;
+  inp.addEventListener('input', () => {
+    if (inp.value === '') return markDirty(col.id, null);
+    const n = parseFloat(inp.value);
+    markDirty(col.id, isPct ? clean(n / 100) : n);
+  });
+  if (!isPct) return inp;
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;align-items:baseline;gap:4px;';
+  const unit = document.createElement('span');
+  unit.textContent = '%';
+  unit.style.cssText = 'font-size:13px;color:var(--text-muted);';
+  wrap.appendChild(inp);
+  wrap.appendChild(unit);
+  return wrap;
 }
 
 function buildLongText(col, val, emptyText = 'Non renseigné') {
