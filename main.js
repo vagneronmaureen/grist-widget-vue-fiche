@@ -17,6 +17,14 @@ let tableId           = null;
 let lastGristRecord   = null;   // dernier événement onRecord reçu (peut être null)
 let recordsReady      = false;  // true dès que onRecords a répondu une première fois
 let modeReady         = false;  // true dès que le mode (interne / liée) est chargé
+let settingsReady     = false;  // true dès que les paramètres du widget sont chargés
+let totalRows         = null;   // nombre total de lignes de la table (hors filtre de lien)
+let totalChecked      = false;  // true dès que totalRows a été interrogé (succès ou échec)
+let _totalForLen      = -1;     // taille de liste pour laquelle totalRows a été calculé
+// Vue liée à un filtre (ex. menu déroulant) : un filtre « null » renvoie TOUTE la table avec le
+// curseur sur la première ligne. Si true, on n'affiche une fiche que lorsque la liste reçue est
+// plus petite que la table (= un filtre est réellement appliqué).
+let linkedNeedsFilter = true;
 
 // ── Réglages du widget (définis en mode Configurer, persistés dans les options Grist) ──
 // editMethod : 'button' = modification via le bouton « Éditer » / 'direct' = champs modifiables directement
@@ -238,6 +246,7 @@ async function loadSettings() {
     const s = await grist.getOption('settings');
     if (s && typeof s === 'object') {
       if (s.editMethod === 'direct' || s.editMethod === 'button') editMethod = s.editMethod;
+      if (typeof s.linkedNeedsFilter === 'boolean') linkedNeedsFilter = s.linkedNeedsFilter;
       if (s.search && typeof s.search === 'object') {
         searchCfg = {
           labelCol:   s.search.labelCol || null,
@@ -247,11 +256,13 @@ async function loadSettings() {
       }
     }
   } catch(e) {}
+  settingsReady = true;
   applySettings();
+  syncRecord(true);
 }
 
 function saveSettings() {
-  try { grist.setOption('settings', { editMethod, search: searchCfg }); } catch(e) {}
+  try { grist.setOption('settings', { editMethod, linkedNeedsFilter, search: searchCfg }); } catch(e) {}
 }
 
 // Réapplique les réglages à l'interface
@@ -310,6 +321,14 @@ function openSettingsModal() {
         </div>
 
         <div>
+          <div style="${h}">Vue liée à un filtre</div>
+          <label style="${radioRow}">
+            <input type="checkbox" id="st-linkedfilter" ${linkedNeedsFilter ? 'checked' : ''} style="margin-top:3px;accent-color:var(--accent);">
+            <span><b>N'afficher une fiche que si le filtre est appliqué</b><br><span style="color:var(--text-muted);font-size:12px;">Pour un widget relié à un menu déroulant : tant qu'aucune valeur n'est choisie (filtre à null), Grist envoie toute la table et la première ligne serait affichée à tort. À décocher si le widget est relié à une table par « Sélectionner par » (liaison par curseur).</span></span>
+          </label>
+        </div>
+
+        <div>
           <div style="${h}">Recherche de produit (vue non liée)</div>
           <div style="font-size:12px;color:var(--text-label);margin-bottom:4px;">Champ affiché (libellé)</div>
           <select id="st-label" style="${selStyle}">${colOptions(searchCfg.labelCol, '— détecté automatiquement —')}</select>
@@ -343,6 +362,7 @@ function openSettingsModal() {
   el('st-ok').addEventListener('click', () => {
     const r = modal.querySelector('input[name="st-editmethod"]:checked');
     editMethod = (r && r.value === 'direct') ? 'direct' : 'button';
+    linkedNeedsFilter = !!el('st-linkedfilter').checked;
     searchCfg = {
       labelCol:   el('st-label').value || null,
       subCol:     el('st-sub').value   || null,
@@ -350,6 +370,7 @@ function openSettingsModal() {
     };
     saveSettings();
     applySettings();
+    syncRecord(true);
     close();
     showToast('✓ Paramètres enregistrés');
   });
@@ -655,10 +676,12 @@ grist.onRecords(async (records) => {
   // Vérifier l'accès en écriture dès qu'on a la table et au moins un enregistrement
   if (tableId && records.length > 0) checkTableWriteAccess();
   recordsReady = true;
-  // La fiche affichée n'est plus dans les lignes visibles (ex. filtre repassé à null) → on la vide
-  if (currentRecord && !records.some(r => r.id === currentRecord.id)) clearCurrentRecord();
-  // Aucune fiche affichée : on (ré)évalue le dernier onRecord reçu maintenant que la liste est connue
-  if (!currentRecord) syncRecord();
+  // Nombre total de lignes de la table : sert à savoir si un filtre de lien est appliqué
+  if (tableId && (!totalChecked || records.length !== _totalForLen)) {
+    _totalForLen = records.length;
+    refreshTotalRows();
+  }
+  syncRecord();
   hide('loading');
   if (!currentRecord) show('empty-state');
 });
@@ -684,21 +707,50 @@ function clearCurrentRecord() {
   else el('product-search-input').value = '';
 }
 
-function syncRecord() {
-  if (!recordsReady || !modeReady) return;
-  const rec = lastGristRecord;
-  // Aucune sélection (null / id 0) ou ligne hors de la liste visible → état vide
-  if (!rec || !rec.id || !allRecords.some(r => r.id === rec.id)) {
+async function refreshTotalRows() {
+  try {
+    const rows = await grist.docApi.fetchTable(tableId);
+    totalRows = rows.id.length;
+  } catch(e) { totalRows = null; }
+  totalChecked = true;
+  syncRecord();
+}
+
+// Détermine la fiche à afficher et l'applique.
+// fromCursor = true quand l'appel vient d'un événement onRecord (ou d'un changement de réglage) :
+// on ré-applique alors même si c'est la même ligne (valeurs mises à jour).
+function syncRecord(fromCursor = false) {
+  if (!recordsReady || !modeReady || !settingsReady) return;
+  const rec    = lastGristRecord;
+  const inList = r => !!(r && r.id && allRecords.some(x => x.id === r.id));
+  let target = null;
+
+  if (selectionMode === 'linked' && linkedNeedsFilter) {
+    if (!totalChecked) return; // on attend le nombre total de lignes (évite d'afficher la 1re ligne à tort)
+    if (totalRows === null) {
+      target = inList(rec) ? rec : null; // total inconnu : repli sur le curseur
+    } else if (allRecords.length > 0 && allRecords.length < totalRows) {
+      // Un filtre est appliqué : le curseur peut être resté sur l'ancienne ligne → on prend
+      // la ligne du curseur si elle est dans la liste filtrée, sinon la première de la liste
+      target = inList(rec) ? rec : allRecords[0];
+    }
+    // sinon : liste = toute la table (ou vide) → aucune sélection, target reste null
+  } else {
+    target = inList(rec) ? rec : null;
+  }
+
+  if (!target) {
     if (currentRecord || el('product-form').style.display !== 'none') clearCurrentRecord();
     else { hide('loading'); show('empty-state'); }
     return;
   }
-  applyRecord(rec);
+  if (currentRecord && currentRecord.id === target.id && !fromCursor) return;
+  applyRecord(target);
 }
 
 grist.onRecord((record) => {
   lastGristRecord = record;
-  syncRecord();
+  syncRecord(true);
 });
 
 function applyRecord(record) {
