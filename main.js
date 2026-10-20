@@ -14,6 +14,9 @@ let userAccess        = null;   // 'owners' | 'editors' | 'viewers' | null | 'un
 let canWriteTable     = false;  // accès en écriture à la table courante (vérifié via ACL Grist)
 let tableWriteChecked = null;   // tableId pour laquelle l'accès a déjà été testé
 let tableId           = null;
+let lastGristRecord   = null;   // dernier événement onRecord reçu (peut être null)
+let recordsReady      = false;  // true dès que onRecords a répondu une première fois
+let modeReady         = false;  // true dès que le mode (interne / liée) est chargé
 
 // ── Réglages du widget (définis en mode Configurer, persistés dans les options Grist) ──
 // editMethod : 'button' = modification via le bouton « Éditer » / 'direct' = champs modifiables directement
@@ -396,6 +399,9 @@ async function loadSelectionMode() {
   } catch(e) {}
   syncTopbarZone();
   updateLinkBtn();
+  updateEmptyStateMsg();
+  modeReady = true;
+  syncRecord(); // un onRecord reçu avant le chargement du mode peut maintenant être traité
 }
 
 // Bascule entre les deux modes et persiste le choix (owners en mode config uniquement)
@@ -648,21 +654,54 @@ grist.onRecords(async (records) => {
   populateSelect();
   // Vérifier l'accès en écriture dès qu'on a la table et au moins un enregistrement
   if (tableId && records.length > 0) checkTableWriteAccess();
+  recordsReady = true;
+  // La fiche affichée n'est plus dans les lignes visibles (ex. filtre repassé à null) → on la vide
+  if (currentRecord && !records.some(r => r.id === currentRecord.id)) clearCurrentRecord();
+  // Aucune fiche affichée : on (ré)évalue le dernier onRecord reçu maintenant que la liste est connue
+  if (!currentRecord) syncRecord();
   hide('loading');
   if (!currentRecord) show('empty-state');
 });
 
-grist.onRecord((record) => {
-  // En mode vue liée, Grist peut envoyer null quand aucune ligne n'est sélectionnée
-  if (!record || !record.id) {
-    currentRecord = null;
-    el('product-form').style.display = 'none';
-    updateEmptyStateMsg();
-    show('empty-state');
-    if (selectionMode === 'linked') updateLinkedBadge();
+// ── Synchronisation onRecord / onRecords ──
+// Grist envoie onRecord (ligne sous le curseur) et onRecords (lignes visibles après
+// application du lien) dans un ordre non garanti. À l'arrivée sur la page, avec un filtre
+// à null, onRecord peut transmettre une ligne par défaut qui n'est PAS dans la liste filtrée.
+// On n'affiche donc une fiche que si (1) le mode est chargé, (2) onRecords est arrivé,
+// et (3) la ligne fait bien partie des lignes visibles.
+// (variables lastGristRecord / recordsReady / modeReady déclarées en tête de fichier)
+
+function clearCurrentRecord() {
+  currentRecord = null;
+  pendingChanges = {};
+  pendingSavedValues = null;
+  el('product-form').style.display = 'none';
+  updateSaveButtons();
+  updateEmptyStateMsg();
+  hide('loading');
+  show('empty-state');
+  if (selectionMode === 'linked') updateLinkedBadge();
+  else el('product-search-input').value = '';
+}
+
+function syncRecord() {
+  if (!recordsReady || !modeReady) return;
+  const rec = lastGristRecord;
+  // Aucune sélection (null / id 0) ou ligne hors de la liste visible → état vide
+  if (!rec || !rec.id || !allRecords.some(r => r.id === rec.id)) {
+    if (currentRecord || el('product-form').style.display !== 'none') clearCurrentRecord();
+    else { hide('loading'); show('empty-state'); }
     return;
   }
+  applyRecord(rec);
+}
 
+grist.onRecord((record) => {
+  lastGristRecord = record;
+  syncRecord();
+});
+
+function applyRecord(record) {
   if (hasPendingChanges() && !confirm('Des modifications non enregistrées seront perdues. Continuer ?')) return;
   const prev = currentRecord;
   // Si la ligne change, les valeurs sauvegardées ne s'appliquent plus
@@ -704,7 +743,7 @@ grist.onRecord((record) => {
     const _p = _productLabels.find(p => p.id === record.id);
     el('product-search-input').value = _p ? _p.label : getProductLabel(record);
   }
-});
+}
 
 // ══════════════════════════════════════════════
 // SÉLECTEUR PRODUIT (recherche avec dropdown)
