@@ -1549,12 +1549,8 @@ function buildFieldDisplay(item, col, val, kind) {
     if (!ids.length) return null;
     const wrap = document.createElement('div');
     wrap.className = 'attachment-list';
-    ids.forEach((_, i) => {
-      const chip = document.createElement('span');
-      chip.className = 'attachment-chip';
-      chip.innerHTML = `<svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M3 2a1 1 0 011-1h7.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0114 3.414V14a1 1 0 01-1 1H4a1 1 0 01-1-1V2z"/></svg> Fichier ${i+1}`;
-      wrap.appendChild(chip);
-    });
+    ensureAttachmentMeta(ids);
+    ids.forEach((id, i) => wrap.appendChild(makeAttachmentChip(id, i)));
     return wrap;
   }
   // Texte / Nombre / LongText
@@ -1722,6 +1718,85 @@ function buildDate(col, val, withTime, emptyText = 'Non renseigné') {
   return inp;
 }
 
+// ── Pièces jointes : nom du fichier + téléchargement ──
+let attachMeta      = {};          // id de pièce jointe -> { name, size }
+let _attachLoading  = false;
+const _attachTried  = new Set();   // ids déjà demandés (évite les rechargements en boucle)
+
+// Charge les noms de fichiers depuis la table système _grist_Attachments, puis re-rend la fiche
+async function ensureAttachmentMeta(ids) {
+  const missing = ids.filter(id => !attachMeta[id] && !_attachTried.has(id));
+  if (!missing.length || _attachLoading) return;
+  _attachLoading = true;
+  missing.forEach(id => _attachTried.add(id));
+  try {
+    const rows = await grist.docApi.fetchTable('_grist_Attachments');
+    rows.id.forEach((id, i) => {
+      attachMeta[id] = {
+        name: rows.fileName ? rows.fileName[i] : '',
+        size: rows.fileSize ? rows.fileSize[i] : null
+      };
+    });
+    renderForm();
+  } catch(e) { console.warn('[Widget] noms des pièces jointes :', e); }
+  _attachLoading = false;
+}
+
+// Télécharge une pièce jointe via un jeton d'accès en lecture seule fourni par Grist
+async function downloadAttachment(id) {
+  const name = (attachMeta[id] && attachMeta[id].name) || `fichier-${id}`;
+  try {
+    const t   = await grist.docApi.getAccessToken({ readOnly: true });
+    const url = `${t.baseUrl}/attachments/${id}/download?auth=${encodeURIComponent(t.token)}`;
+    try {
+      // Téléchargement sous le vrai nom du fichier
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const blobUrl = URL.createObjectURL(await resp.blob());
+      const a = document.createElement('a');
+      a.href = blobUrl; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+    } catch(e) {
+      window.open(url, '_blank'); // repli : ouverture directe dans un nouvel onglet
+    }
+  } catch(e) {
+    showToast('Téléchargement impossible : ' + e.message, 4000);
+  }
+}
+
+function formatFileSize(n) {
+  if (typeof n !== 'number' || n <= 0) return '';
+  if (n < 1024) return n + ' o';
+  if (n < 1024 * 1024) return Math.round(n / 1024) + ' Ko';
+  return (n / 1024 / 1024).toFixed(1).replace('.', ',') + ' Mo';
+}
+
+// Pastille d'une pièce jointe : nom cliquable pour télécharger, croix de suppression si onRemove
+function makeAttachmentChip(id, index, onRemove) {
+  const meta = attachMeta[id];
+  const chip = document.createElement('span');
+  chip.className = 'attachment-chip';
+  chip.innerHTML = `<svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M3 2a1 1 0 011-1h7.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0114 3.414V14a1 1 0 01-1 1H4a1 1 0 01-1-1V2z"/></svg>`;
+
+  const lbl = document.createElement('span');
+  lbl.textContent = (meta && meta.name) ? meta.name : `Fichier ${index + 1}`;
+  const size = meta ? formatFileSize(meta.size) : '';
+  lbl.title = 'Télécharger' + (size ? ` (${size})` : '');
+  lbl.style.cssText = 'cursor:pointer;text-decoration:underline;max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+  lbl.addEventListener('click', e => { e.stopPropagation(); downloadAttachment(id); });
+  chip.appendChild(lbl);
+
+  if (onRemove) {
+    const rm = document.createElement('span');
+    rm.textContent = '×'; rm.title = 'Retirer';
+    rm.style.cssText = 'cursor:pointer;font-size:13px;opacity:.7;';
+    rm.addEventListener('click', e => { e.stopPropagation(); onRemove(); });
+    chip.appendChild(rm);
+  }
+  return chip;
+}
+
 // ── Pièce jointe ──
 function buildAttachment(col, val, emptyText = 'Non renseigné') {
   const ids = Array.isArray(val) ? val.filter(v => typeof v === 'number' && v > 0) : [];
@@ -1733,21 +1808,15 @@ function buildAttachment(col, val, emptyText = 'Non renseigné') {
   if (ids.length > 0) {
     const list = document.createElement('div');
     list.className = 'attachment-list';
+    ensureAttachmentMeta(ids);
     ids.forEach((id, i) => {
-      const chip = document.createElement('span');
-      chip.className = 'attachment-chip';
-      chip.innerHTML = `<svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M3 2a1 1 0 011-1h7.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0114 3.414V14a1 1 0 01-1 1H4a1 1 0 01-1-1V2z"/></svg> Fichier ${i+1}`;
-      // Croix de suppression
-      const rm = document.createElement('span');
-      rm.textContent = '×'; rm.style.cssText = 'cursor:pointer;font-size:13px;opacity:.7;';
-      rm.addEventListener('click', e => {
-        e.stopPropagation();
+      // Nom cliquable (téléchargement) + croix de suppression
+      const chip = makeAttachmentChip(id, i, () => {
         const newIds = ids.filter((_, j) => j !== i);
         markDirty(col.id, newIds.length ? ['L', ...newIds] : null);
         const cell = wrap.closest('.form-field');
         if (cell) cell.classList.toggle('field-empty', newIds.length === 0);
       });
-      chip.appendChild(rm);
       list.appendChild(chip);
     });
     wrap.appendChild(list);
